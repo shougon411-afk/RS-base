@@ -406,6 +406,8 @@ def checkin_scan():
 
 
 def _cors(resp):
+    if isinstance(resp, tuple):
+        resp = app.make_response(resp)
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Api-Key"

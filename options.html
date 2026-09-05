@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>問診ビューア 設定</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; width: 380px; }
+  label { display: block; margin-bottom: 6px; font-weight: bold; }
+  input { width: 100%; padding: 8px; font-size: 14px; box-sizing: border-box; }
+  button { margin-top: 12px; padding: 8px 16px; cursor: pointer; }
+  .hint { color: #666; font-size: 12px; margin-top: 6px; }
+  .status { margin-top: 10px; color: green; font-size: 13px; }
+</style>
+</head>
+<body>
+  <label for="serverBase">問診サーバーのアドレス</label>
+  <input id="serverBase" type="text" placeholder="例: http://192.168.12.99:5000">
+  <div class="hint">問診サーバー(app.py)を動かしているPCのIPアドレスとポート番号を入力してください。</div>
+  <button id="saveBtn">保存</button>
+  <div id="status" class="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>

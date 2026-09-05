@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "問診ビューア for RS_Base",
+  "version": "1.0.0",
+  "description": "N2017.cgi(RS_Base)の患者画面に「問診」ボタンを追加し、自作の問診結果をポップアップ表示します。",
+  "permissions": ["storage"],
+  "host_permissions": ["http://192.168.12.40/*"],
+  "content_scripts": [
+    {
+      "matches": ["http://192.168.12.40/~rsn/N2017.cgi*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html"
+}

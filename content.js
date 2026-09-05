@@ -34,8 +34,8 @@
 
     const btn = document.createElement("div");
     btn.id = BUTTON_ID;
-    btn.textContent = "問診";
-    btn.title = "問診結果を新しいタブで開く";
+    btn.textContent = "問診表示";
+    btn.title = "この患者の問診結果を新しいタブで開く";
     btn.style.cssText = [
       "position:fixed",
       "right:0",

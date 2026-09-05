@@ -1,20 +1,109 @@
-# ブックマークレットの使い方
+# 問診システム 一式(v2)
 
-## 1. 下記の1行コードをコピーする
+RS_Base(N2017.cgi)のデータベースには一切書き込みません。**別の独立したシステム**として、
+発行したリンク(トークン)経由で患者IDと紐づけて動きます。
 
-`API_BASE` と `API_KEY` の部分を、実際にデプロイしたサーバーの値に書き換えてから使ってください。
+## 今回の構成(要件反映版)
 
+- **患者用フォーム(`/form/<トークン>`)**: ログイン不要。インターネット経由で
+  患者さんのスマホなど、どのネットワークからでも開けます。
+- **スタッフ用の確認画面・リンク発行(`/admin/...`)**: 共通パスワードでログインが
+  必要です。クリニックの回線が変動IPのため、IP制限ではなくパスワードで保護しています。
+- 患者IDをそのままURLに入れず、**推測されにくいランダムなトークン**を発行する方式に
+  変更しました。他人のIDを勝手に開かれるリスクを防ぎます。
+
+---
+
+## 1. サーバーをインターネット上にデプロイする(Railway)
+
+このリポジトリをGitHubにアップロードしたら、Railwayのダッシュボードで以下のように設定してください
+(またはClaudeにリポジトリ名を伝えれば、ここから先はRailway連携経由で代行します)。
+
+1. Railwayで「New Project」→「Deploy from GitHub repo」→ このリポジトリを選択
+2. サービスの Settings → **Root Directory を `server` に設定**
+   (リポジトリ直下ではなく `server/` フォルダの中身をアプリとして扱うため)
+3. Settings → Variables で以下を設定(すべて必ず変更してください)
+
+   | 変数名 | 内容 |
+   |---|---|
+   | `ADMIN_PASSWORD` | スタッフ用ログインパスワード |
+   | `SECRET_KEY` | セッション用のランダムな長い文字列 |
+   | `REGISTER_API_KEY` | ブックマークレットからの登録を認証するキー |
+   | `RS_BASE_URL_TEMPLATE` | 既定値のままでOK: `http://192.168.12.40/~rsn/N2017.cgi?{id}====` |
+
+4. Settings → Networking → 「Generate Domain」でHTTPS付きの公開URLを発行
+5. 発行されたURLに `/admin/login` を付けて開き、ログインできれば成功です
+
+ローカルで試す場合:
+
+```bash
+cd server
+pip install -r requirements.txt
+export ADMIN_PASSWORD="好きなパスワード"
+export SECRET_KEY="ランダムな長い文字列"
+export REGISTER_API_KEY="ランダムな長い文字列"
+python app.py
 ```
-javascript:(function(){var CONFIG={API_BASE:"[https://your-app.up.railway.app](https://monshin-server-production.up.railway.app)",API_KEY:"P7JomFWCkCK663GIQMVsLZmB4CzGd-t7"};function extractPatientId(){var html=document.documentElement.innerHTML;var m=html.match(/RS_VOICE_PATIENT_ID\s*=\s*'(\d+)'/);if(m)return m[1];m=html.match(/kanja_id=(\d+)/);if(m)return m[1];return null;}function extractName(){var html=document.documentElement.innerHTML;var m=html.match(/font-family:\s*'?メイリオ'?">([^<]+)<\/span>/);return m?m[1].trim():"";}function extractDob(){var html=document.documentElement.innerHTML;var m=html.match(/(\d{4}\/\d{1,2}\/\d{1,2})生/);return m?m[1]:"";}var id=extractPatientId();var name=extractName();var dob=extractDob();if(!id){alert("患者IDを取得できませんでした。");return;}fetch(CONFIG.API_BASE+"/checkin/register",{method:"POST",headers:{"Content-Type":"application/json","X-Api-Key":CONFIG.API_KEY},body:JSON.stringify({id:id,name:name,dob:dob})}).then(function(res){return res.json();}).then(function(data){if(data&&data.confirm_url){location.href=data.confirm_url;}else{alert("登録に失敗しました: "+JSON.stringify(data));}}).catch(function(err){alert("通信エラー: "+err.message);});})();
-```
 
-## 2. iPhone Chromeへの登録手順
+`http://<デプロイ先のドメイン>/admin/login` にアクセスしてログインできれば成功です。
 
-1. Chromeで適当なページを開き、共有ボタン→「ブックマークに追加」でひとまずブックマークを1つ作る
-2. Chromeの「ブックマーク」一覧を開き、①で作ったブックマークを長押し→「編集」
-3. 名前を「問診登録」などに変更、URL欄の中身を全部消して上記の1行コードを貼り付け、保存
-4. N2017.cgiの患者画面を開いた状態で、ブックマーク一覧からこの「問診登録」をタップすると実行されます
+---
 
-**Chromeでうまく保存できない場合(iOSやChromeのバージョンによってはjavascript:を
-弾くことがあります)**は、同じ手順をSafariで試してください。SafariはiOSの中で
-最もブックマークレットの動作が安定しています。
+## 2. 使い方(スタッフ側)
+
+1. `https://<デプロイ先ドメイン>/admin/login` を開き、パスワードでログイン
+2. 「問診リンクの発行」画面で患者IDを入力→リンクとQRコードが発行される
+3. そのリンク(またはQRコード)を患者さんに渡す(SMS・院内掲示のQR・印刷など)
+4. 患者さんが自分のスマホ等でリンクを開いて回答
+5. スタッフは同じ管理画面の「回答結果を見る」から患者IDを入力して確認、
+   または下記のChrome拡張機能のボタンからワンクリックで確認
+
+---
+
+## 3. Chrome拡張機能(N2017.cgi画面にボタンを追加)
+
+N2017.cgiを開いているPCは電子カルテ専用網とインターネットの両方につながっている、
+とのことなので、この拡張機能でボタンから直接サーバーを開けます。
+
+1. `chrome://extensions` を開き、「デベロッパーモード」をON
+2. 「パッケージ化されていない拡張機能を読み込む」で `extension` フォルダを選択
+3. 拡張機能の「オプション」から、デプロイしたサーバーのアドレス
+   (例: `https://your-app.up.railway.app`)を保存
+4. N2017.cgiの患者画面を開き直すと「問診」ボタンが表示される
+5. クリックすると新しいタブでその患者の確認画面が開く(初回はログインを求められます。
+   一度ログインすればブラウザに保存され、次回以降は自動で開きます)
+
+---
+
+---
+
+## 4. 受付フロー(プロトタイプ)を試す
+
+今回追加した受付フローの動作確認用ページです。問診の入力項目の作り込みは後回しにして、
+まず「QRスキャン→N2017.cgi→ブックマークレット→確認画面」の一連の動きを確認できます。
+
+追加の環境変数:
+
+| 環境変数 | 内容 |
+|---|---|
+| `REGISTER_API_KEY` | ブックマークレットからの登録リクエストを認証する簡易キー(必ず変更) |
+| `RS_BASE_URL_TEMPLATE` | N2017.cgiのURLの型。既定値: `http://192.168.12.40/~rsn/N2017.cgi?{id}====` |
+
+手順:
+
+1. `https://<デプロイ先>/checkin` をiPhoneのChrome(またはSafari)で開く
+2. カメラが起動するので、診察券のQRコードを映す(**現状はQRの中の数字部分をそのまま
+   患者IDとして扱う実装です**。実際の診察券QRの中身を確認して、想定と違えば教えてください)
+3. 自動でN2017.cgiのその患者の画面に遷移する
+4. `bookmarklet/README.md` の手順で登録したブックマークレットをタップする
+5. 自動で確認画面(`/checkin/confirm`)に戻り、氏名・生年月日と問診QRが表示される
+6. 表示されたQRを自分のスマホで読み取ると、`/form/<トークン>` の問診フォーム(叩き台)が開く
+
+## 今後調整できるポイント
+
+- 問診項目(`server/app.py` 内の `FIELDS`)は自由に増減・変更できます
+- 現在はスタッフ全員で1つの共通パスワードですが、人数が増えたらスタッフごとの
+  アカウントに拡張できます
+- データ保存は現在シンプルなJSONファイルです。件数が増えたらデータベース化を検討してください
+- 発行したリンク(トークン)に有効期限をつける、一度回答したら無効化する、といった
+  追加のセキュリティ強化も可能です

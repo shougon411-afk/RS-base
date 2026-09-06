@@ -23,7 +23,7 @@ import json
 import os
 import re
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 
 import qrcode
@@ -44,6 +44,17 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 TOKENS_PATH = os.path.join(DATA_DIR, "_tokens.json")
 DIRECTORY_PATH = os.path.join(DATA_DIR, "_directory.json")
+
+JST = timezone(timedelta(hours=9))
+
+
+def now_jst() -> datetime:
+    return datetime.now(JST)
+
+
+def now_jst_str() -> str:
+    return now_jst().strftime("%Y-%m-%d %H:%M:%S")
+
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-key-before-deploying")
@@ -83,7 +94,7 @@ def create_token(patient_id: str, form_type: str = "general") -> str:
     tokens[token] = {
         "patient_id": patient_id,
         "form_type": form_type,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "created_at": now_jst_str(),
     }
     _save_tokens(tokens)
     return token
@@ -129,7 +140,7 @@ def upsert_directory(patient_id: str, name: str, dob: str, gender: str = ""):
         "name": name,
         "dob": dob,
         "gender": gender or existing.get("gender", ""),
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_at": now_jst_str(),
     }
     _save_directory(directory)
 
@@ -145,7 +156,7 @@ def calculate_age(dob_str: str):
     if not m:
         return None
     y, mo, d = (int(x) for x in m.groups())
-    today = datetime.now()
+    today = now_jst()
     age = today.year - y
     if (today.month, today.day) < (mo, d):
         age -= 1
@@ -668,7 +679,7 @@ def api_submissions():
     if not _staff_authorized():
         return _cors(("unauthorized", 401))
 
-    date_str = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
+    date_str = request.args.get("date") or now_jst().strftime("%Y-%m-%d")
     directory = _load_directory()
     results = []
 
@@ -689,7 +700,8 @@ def api_submissions():
                 continue
             form_type = record.get("form_type", "general")
             fields_only = {
-                k: v for k, v in record.items() if k not in ("submitted_at", "form_type")
+                k: v for k, v in record.items()
+                if k not in ("submitted_at", "form_type", "confirmed")
             }
             dir_entry = directory.get(patient_id, {})
             results.append(
@@ -699,12 +711,40 @@ def api_submissions():
                     "dob": dir_entry.get("dob", ""),
                     "submitted_at": submitted_at,
                     "form_type": form_type,
+                    "confirmed": bool(record.get("confirmed", False)),
                     "fields": fields_only,
                 }
             )
 
     results.sort(key=lambda r: r.get("submitted_at", ""), reverse=True)
     return _cors(jsonify({"date": date_str, "submissions": results}))
+
+
+@app.route("/admin/api/confirm", methods=["POST", "OPTIONS"])
+def api_confirm():
+    if request.method == "OPTIONS":
+        return _cors(app.make_default_options_response())
+    if not _staff_authorized():
+        return _cors(("unauthorized", 401))
+
+    payload = request.get_json(silent=True) or {}
+    patient_id = str(payload.get("patient_id", "")).strip()
+    submitted_at = str(payload.get("submitted_at", "")).strip()
+    if not patient_id or not submitted_at:
+        return _cors(("patient_id and submitted_at required", 400))
+
+    records = load_records(patient_id)
+    changed = False
+    for r in records:
+        if r.get("submitted_at") == submitted_at:
+            r["confirmed"] = True
+            changed = True
+
+    if changed:
+        with open(data_path(patient_id), "w", encoding="utf-8") as fh:
+            json.dump(records, fh, ensure_ascii=False, indent=2)
+
+    return _cors(jsonify({"ok": changed}))
 
 
 CHECKIN_CONFIRM_PAGE = """
@@ -1459,8 +1499,9 @@ def submit_urology():
 
     f = request.form
     record = {
-        "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "submitted_at": now_jst_str(),
         "form_type": "urology_general",
+        "confirmed": False,
         "ticketNumber": f.get("ticketNumber", "").strip(),
         "pastIllnessStatus": f.get("pastIllnessStatus", ""),
         "pastIllnessItems": "、".join(f.getlist("pastIllnessItems")),
@@ -1519,7 +1560,7 @@ def compute_age(dob: str) -> int:
     try:
         parts = dob.replace("　", " ").strip().split("/")
         y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
-        today = datetime.now()
+        today = now_jst()
         age = today.year - y
         if (today.month, today.day) < (m, d):
             age -= 1
@@ -1574,7 +1615,7 @@ def submit():
             saved=False, token=token, fields=fields,
         )
 
-    record = {"submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "form_type": form_type}
+    record = {"submitted_at": now_jst_str(), "form_type": form_type, "confirmed": False}
     for f in fields:
         if f["type"] == "computed":
             continue

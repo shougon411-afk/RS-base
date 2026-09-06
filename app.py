@@ -35,6 +35,7 @@ from flask import (
     session,
     send_file,
     abort,
+    jsonify,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -72,11 +73,12 @@ def _save_tokens(tokens):
         json.dump(tokens, f, ensure_ascii=False, indent=2)
 
 
-def create_token(patient_id: str) -> str:
+def create_token(patient_id: str, form_type: str = "general") -> str:
     tokens = _load_tokens()
     token = secrets.token_urlsafe(16)
     tokens[token] = {
         "patient_id": patient_id,
+        "form_type": form_type,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     _save_tokens(tokens)
@@ -87,6 +89,12 @@ def resolve_token(token: str):
     tokens = _load_tokens()
     entry = tokens.get(token)
     return entry["patient_id"] if entry else None
+
+
+def resolve_token_type(token: str) -> str:
+    tokens = _load_tokens()
+    entry = tokens.get(token)
+    return entry.get("form_type", "general") if entry else "general"
 
 
 def resolve_token_full(token: str):
@@ -154,20 +162,29 @@ def save_record(patient_id: str, record: dict):
 # 問診項目の定義(叩き台。必要に応じて編集してください)
 # ---------------------------------------------------------------------------
 
-FIELDS = [
-    {"key": "chief_complaint", "label": "本日困っていること・受診理由", "type": "textarea"},
-    {"key": "history", "label": "既往歴(これまでにかかった病気)", "type": "textarea"},
-    {"key": "allergy", "label": "アレルギー(薬・食物など)", "type": "textarea"},
-    {"key": "medication", "label": "現在服用中のお薬", "type": "textarea"},
-    {"key": "smoking", "label": "喫煙", "type": "radio", "options": ["なし", "以前吸っていた", "現在吸っている"]},
-    {"key": "alcohol", "label": "飲酒", "type": "radio", "options": ["なし", "機会飲酒", "毎日飲む"]},
-    {"key": "hepatitis", "label": "B型・C型肝炎、ピロリ菌の指摘", "type": "radio", "options": ["なし", "あり", "不明"]},
-    {"key": "other_hospital", "label": "他科受診中の病院・診療科", "type": "textarea"},
-    {"key": "care_level", "label": "要介護度", "type": "radio", "options": ["なし", "要支援", "要介護"]},
-    {"key": "family_history", "label": "家族歴", "type": "textarea"},
-    {"key": "family_living", "label": "同居家族", "type": "textarea"},
-    {"key": "family_contact", "label": "緊急連絡先(ご家族の連絡先)", "type": "text"},
-]
+FORM_TYPES = {
+    "general": {
+        "label": "一般問診(テスト用)",
+        "fields": [
+            {"key": "chief_complaint", "label": "本日困っていること・受診理由", "type": "textarea"},
+            {"key": "history", "label": "既往歴(これまでにかかった病気)", "type": "textarea"},
+            {"key": "allergy", "label": "アレルギー(薬・食物など)", "type": "textarea"},
+            {"key": "medication", "label": "現在服用中のお薬", "type": "textarea"},
+            {"key": "smoking", "label": "喫煙", "type": "radio", "options": ["なし", "以前吸っていた", "現在吸っている"]},
+            {"key": "alcohol", "label": "飲酒", "type": "radio", "options": ["なし", "機会飲酒", "毎日飲む"]},
+            {"key": "hepatitis", "label": "B型・C型肝炎、ピロリ菌の指摘", "type": "radio", "options": ["なし", "あり", "不明"]},
+            {"key": "other_hospital", "label": "他科受診中の病院・診療科", "type": "textarea"},
+            {"key": "care_level", "label": "要介護度", "type": "radio", "options": ["なし", "要支援", "要介護"]},
+            {"key": "family_history", "label": "家族歴", "type": "textarea"},
+            {"key": "family_living", "label": "同居家族", "type": "textarea"},
+            {"key": "family_contact", "label": "緊急連絡先(ご家族の連絡先)", "type": "text"},
+        ],
+    },
+}
+
+
+def get_form_fields(form_type: str):
+    return FORM_TYPES.get(form_type, FORM_TYPES["general"])["fields"]
 
 # ---------------------------------------------------------------------------
 # 管理画面(ログイン保護)
@@ -326,8 +343,9 @@ VIEW_PAGE = """
 def admin_view(patient_id):
     records = load_records(patient_id)
     latest = records[-1] if records else None
+    fields = get_form_fields(latest.get("form_type", "general")) if latest else []
     return render_template_string(
-        VIEW_PAGE, patient_id=patient_id, records=records, latest=latest, fields=FIELDS
+        VIEW_PAGE, patient_id=patient_id, records=records, latest=latest, fields=fields
     )
 
 
@@ -426,22 +444,27 @@ def checkin_register():
     patient_id = str(payload.get("id", "")).strip()
     name = str(payload.get("name", "")).strip()
     dob = str(payload.get("dob", "")).strip()
+    form_type = str(payload.get("type", "general")).strip() or "general"
 
     if not patient_id:
         return _cors(("patient id required", 400))
 
     upsert_directory(patient_id, name, dob)
-    token = create_token(patient_id)
+    token = create_token(patient_id, form_type)
 
-    from flask import jsonify as _jsonify
-
-    resp = _jsonify(
+    resp = jsonify(
         {
             "token": token,
             "confirm_url": request.host_url.rstrip("/") + f"/checkin/confirm?token={token}",
         }
     )
     return _cors(resp)
+
+
+@app.route("/checkin/types")
+def checkin_types():
+    types = [{"id": key, "label": val["label"]} for key, val in FORM_TYPES.items()]
+    return _cors(jsonify({"types": types}))
 
 
 CHECKIN_CONFIRM_PAGE = """
@@ -551,30 +574,34 @@ FORM_PAGE = """
 @app.route("/form/<token>")
 def form(token):
     patient_id = resolve_token(token)
+    form_type = resolve_token_type(token)
+    fields = get_form_fields(form_type)
     if not patient_id:
         return render_template_string(
             FORM_PAGE, error="このリンクは無効です。受付にお問い合わせください。",
-            saved=False, token=token, fields=FIELDS,
+            saved=False, token=token, fields=fields,
         )
-    return render_template_string(FORM_PAGE, token=token, fields=FIELDS, saved=False, error=None)
+    return render_template_string(FORM_PAGE, token=token, fields=fields, saved=False, error=None)
 
 
 @app.route("/submit", methods=["POST"])
 def submit():
     token = request.form.get("token", "").strip()
     patient_id = resolve_token(token)
+    form_type = resolve_token_type(token)
+    fields = get_form_fields(form_type)
     if not patient_id:
         return render_template_string(
             FORM_PAGE, error="このリンクは無効です。受付にお問い合わせください。",
-            saved=False, token=token, fields=FIELDS,
+            saved=False, token=token, fields=fields,
         )
 
-    record = {"submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-    for f in FIELDS:
+    record = {"submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "form_type": form_type}
+    for f in fields:
         record[f["key"]] = request.form.get(f["key"], "").strip()
 
     save_record(patient_id, record)
-    return render_template_string(FORM_PAGE, token=token, fields=FIELDS, saved=True, error=None)
+    return render_template_string(FORM_PAGE, token=token, fields=fields, saved=True, error=None)
 
 
 @app.route("/")
@@ -584,3 +611,4 @@ def index():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+

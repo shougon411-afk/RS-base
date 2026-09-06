@@ -52,6 +52,9 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change-this-password")
 # 必ず環境変数で上書きしてください(既定値のままは危険です)。
 REGISTER_API_KEY = os.environ.get("REGISTER_API_KEY", "change-this-api-key")
 
+# 問診管理アプリ(スタッフ用iPadアプリ)からのAPIアクセスを認証するキー。
+STAFF_API_KEY = os.environ.get("STAFF_API_KEY", "change-this-staff-key")
+
 # 受付端末(N2017.cgi)のURLの組み立て方。院内Wi-Fi経由でのみアクセス可能。
 RS_BASE_URL_TEMPLATE = os.environ.get(
     "RS_BASE_URL_TEMPLATE", "http://192.168.12.40/~rsn/N2017.cgi?{id}===="
@@ -167,6 +170,7 @@ FORM_TYPES = {
         "label": "一般問診(テスト用)",
         "fields": [
             {"key": "chief_complaint", "label": "本日困っていること・受診理由", "type": "textarea"},
+            {"key": "symptom_onset", "label": "症状が出始めた時期(例: 3日前から、1週間前から)", "type": "text"},
             {"key": "history", "label": "既往歴(これまでにかかった病気)", "type": "textarea"},
             {"key": "allergy", "label": "アレルギー(薬・食物など)", "type": "textarea"},
             {"key": "medication", "label": "現在服用中のお薬", "type": "textarea"},
@@ -467,6 +471,65 @@ def checkin_types():
     return _cors(jsonify({"types": types}))
 
 
+# ---------------------------------------------------------------------------
+# 問診管理アプリ(スタッフ用)向けAPI
+# ---------------------------------------------------------------------------
+
+def _staff_authorized() -> bool:
+    return request.headers.get("X-Staff-Key") == STAFF_API_KEY
+
+
+@app.route("/admin/api/form_types")
+def api_form_types():
+    if not _staff_authorized():
+        return _cors(("unauthorized", 401))
+    return _cors(jsonify({"types": FORM_TYPES}))
+
+
+@app.route("/admin/api/submissions")
+def api_submissions():
+    if not _staff_authorized():
+        return _cors(("unauthorized", 401))
+
+    date_str = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
+    directory = _load_directory()
+    results = []
+
+    for fname in os.listdir(DATA_DIR):
+        if fname.startswith("_") or not fname.endswith(".json"):
+            continue
+        patient_id = fname[:-5]
+        path = os.path.join(DATA_DIR, fname)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        except Exception:
+            continue
+
+        for record in records:
+            submitted_at = record.get("submitted_at", "")
+            if not submitted_at.startswith(date_str):
+                continue
+            form_type = record.get("form_type", "general")
+            fields_only = {
+                k: v for k, v in record.items() if k not in ("submitted_at", "form_type")
+            }
+            dir_entry = directory.get(patient_id, {})
+            results.append(
+                {
+                    "patient_id": patient_id,
+                    "name": dir_entry.get("name", ""),
+                    "dob": dir_entry.get("dob", ""),
+                    "submitted_at": submitted_at,
+                    "form_type": form_type,
+                    "fields": fields_only,
+                }
+            )
+
+    results.sort(key=lambda r: r.get("submitted_at", ""), reverse=True)
+    return _cors(jsonify({"date": date_str, "submissions": results}))
+
+
 CHECKIN_CONFIRM_PAGE = """
 <!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -611,4 +674,3 @@ def index():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-

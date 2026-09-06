@@ -21,6 +21,7 @@
 import io
 import json
 import os
+import re
 import secrets
 from datetime import datetime
 from functools import wraps
@@ -121,11 +122,13 @@ def _save_directory(directory):
         json.dump(directory, f, ensure_ascii=False, indent=2)
 
 
-def upsert_directory(patient_id: str, name: str, dob: str):
+def upsert_directory(patient_id: str, name: str, dob: str, gender: str = ""):
     directory = _load_directory()
+    existing = directory.get(patient_id, {})
     directory[patient_id] = {
         "name": name,
         "dob": dob,
+        "gender": gender or existing.get("gender", ""),
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     _save_directory(directory)
@@ -133,6 +136,21 @@ def upsert_directory(patient_id: str, name: str, dob: str):
 
 def lookup_directory(patient_id: str):
     return _load_directory().get(patient_id)
+
+
+def calculate_age(dob_str: str):
+    if not dob_str:
+        return None
+    m = re.match(r"(\d{4})/(\d{1,2})/(\d{1,2})", dob_str)
+    if not m:
+        return None
+    y, mo, d = (int(x) for x in m.groups())
+    today = datetime.now()
+    age = today.year - y
+    if (today.month, today.day) < (mo, d):
+        age -= 1
+    return age
+
 
 
 # ---------------------------------------------------------------------------
@@ -187,43 +205,46 @@ FORM_TYPES = {
     "urology_general": {
         "label": "泌尿器科 一般問診",
         "fields": [
-            {"key": "chief_complaint", "label": "本日困っていること・受診理由", "type": "textarea"},
-            {"key": "symptom_onset", "label": "症状はいつからですか(例: 3日前から、1週間前から)", "type": "text"},
-            {
-                "key": "symptoms",
-                "label": "今日はどうされましたか(当てはまるものをすべて選択)",
-                "type": "checkbox",
-                "options": [
-                    "尿が漏れる", "残尿感がある", "尿が出にくい", "頻尿", "排尿時の痛み",
-                    "背中の痛み", "鼠径部の痛み", "血尿", "睾丸の違和感", "精液に血が混じる",
-                    "性感染症が気になる", "陰部のかゆみ", "おりものの異常", "熱がある",
-                    "男性更年期が気になる", "健康診断で異常を指摘された",
-                    "ブライダルチェック(性病検査)", "精液検査", "ED", "AGA", "脱毛",
-                    "自由注射", "その他",
-                ],
-            },
-            {"key": "other_symptom_detail", "label": "「その他」を選んだ方はその内容", "type": "text"},
-            {
-                "key": "past_illness",
-                "label": "治療中もしくは過去に治療をした病気(当てはまるものを選択)",
-                "type": "checkbox",
-                "options": ["尿管結石", "緑内障", "糖尿病", "高血圧", "狭心症", "不整脈", "脳卒中", "透析", "がん", "その他"],
-            },
-            {"key": "history", "label": "既往歴の詳細・その他特記事項", "type": "textarea"},
-            {"key": "medication", "label": "現在服用中のお薬", "type": "textarea"},
-            {"key": "allergy", "label": "薬のアレルギー", "type": "textarea"},
-            {
-                "key": "family_cancer",
-                "label": "ご家族(血縁者)にがんの方はいますか(当てはまるものを選択)",
-                "type": "checkbox",
-                "options": ["前立腺がん", "膵がん", "乳がん", "卵巣がん", "その他"],
-            },
-            {"key": "alcohol", "label": "飲酒はされますか", "type": "radio", "options": ["飲まない", "たまに飲む", "ほぼ毎日飲む"]},
-            {"key": "smoking", "label": "喫煙はされますか", "type": "radio", "options": ["吸わない", "吸う", "禁煙中"]},
-            {"key": "other_hospital", "label": "他科受診中の病院・診療科", "type": "textarea"},
-            {"key": "care_level", "label": "要介護度", "type": "radio", "options": ["なし", "要支援", "要介護"]},
-            {"key": "family_living", "label": "同居家族", "type": "textarea"},
-            {"key": "family_contact", "label": "緊急連絡先(ご家族の連絡先)", "type": "text"},
+            {"key": "ticketNumber", "label": "番号札の番号", "type": "text"},
+            {"key": "pastIllnessStatus", "label": "治療中もしくは過去に治療をした病気", "type": "text"},
+            {"key": "pastIllnessItems", "label": "既往症(該当項目)", "type": "text"},
+            {"key": "pastIllnessOtherDetail", "label": "既往症その他の詳細", "type": "text"},
+            {"key": "medicationStatus", "label": "現在飲んでいるお薬", "type": "text"},
+            {"key": "medicationBook", "label": "お薬手帳の提出", "type": "text"},
+            {"key": "medicationDetail", "label": "服用中の薬品名", "type": "text"},
+            {"key": "agaStatus", "label": "AGA治療薬の服用", "type": "text"},
+            {"key": "agaDetail", "label": "AGA治療薬の薬品名", "type": "text"},
+            {"key": "familyCancerStatus", "label": "ご家族(血縁者)のがん", "type": "text"},
+            {"key": "familyCancerItems", "label": "家族のがん(該当項目)", "type": "text"},
+            {"key": "familyCancerOtherDetail", "label": "家族のがんその他の詳細", "type": "text"},
+            {"key": "allergyStatus", "label": "薬のアレルギー", "type": "text"},
+            {"key": "allergyDetail", "label": "アレルギーの薬品名", "type": "text"},
+            {"key": "alcohol", "label": "飲酒", "type": "text"},
+            {"key": "smoking", "label": "喫煙", "type": "text"},
+            {"key": "smokeActivePerDay", "label": "喫煙(現在) 1日平均本数", "type": "text"},
+            {"key": "smokeActiveStartAge", "label": "喫煙(現在) 開始年齢", "type": "text"},
+            {"key": "smokeActiveYears", "label": "喫煙(現在) 喫煙年数", "type": "text"},
+            {"key": "smokeQuitPerDay", "label": "喫煙(禁煙中) 1日平均本数", "type": "text"},
+            {"key": "smokeQuitStartAge", "label": "喫煙(禁煙中) 開始年齢", "type": "text"},
+            {"key": "smokeQuitEndAge", "label": "喫煙(禁煙中) 終了年齢", "type": "text"},
+            {"key": "smokeQuitYears", "label": "喫煙(禁煙中) 喫煙年数", "type": "text"},
+            {"key": "pregnant", "label": "妊娠中か", "type": "text"},
+            {"key": "pregnantWeek", "label": "妊娠週数", "type": "text"},
+            {"key": "breastfeeding", "label": "授乳中か", "type": "text"},
+            {"key": "menstruating", "label": "生理中か", "type": "text"},
+            {"key": "symptomOnset", "label": "症状はいつからか", "type": "text"},
+            {"key": "feverStatus", "label": "発熱の有無", "type": "text"},
+            {"key": "feverFrom", "label": "発熱期間(いつから)", "type": "text"},
+            {"key": "feverTo", "label": "発熱期間(いつまで)", "type": "text"},
+            {"key": "feverMaxTemp", "label": "最高体温", "type": "text"},
+            {"key": "symptoms", "label": "今日はどうされましたか(該当症状)", "type": "text"},
+            {"key": "backPainSide", "label": "背中の痛み(部位)", "type": "text"},
+            {"key": "testicleDiscomfortType", "label": "睾丸の違和感(種類)", "type": "text"},
+            {"key": "stdConcernDetail", "label": "性感染症が気になる(詳細)", "type": "text"},
+            {"key": "stdDiseaseDetail", "label": "性感染症の病名", "type": "text"},
+            {"key": "checkupAbnormalityDetail", "label": "健康診断で指摘された項目", "type": "text"},
+            {"key": "freeInjectionItems", "label": "自由注射(種類)", "type": "text"},
+            {"key": "voidingOneWeekPlus", "label": "排尿症状は以前から気になるか", "type": "text"},
 
             {"key": "ipss_residual", "label": "残尿感:排尿後に尿が残っている感じがありましたか", "type": "score_radio",
              "options": ["まったくなかった", "5回に1回未満", "2回に1回未満", "2回に1回くらい", "2回に1回以上", "ほとんどいつも"]},
@@ -254,7 +275,7 @@ FORM_TYPES = {
              "options": ["なし", "週に1回より少ない", "週に1回以上", "1日1回くらい", "1日2〜4回", "1日5回以上"]},
             {"key": "oabss_total", "label": "OABSS合計点(15点満点)", "type": "computed"},
 
-            {"key": "free_note", "label": "その他、医師・スタッフへのご要望など", "type": "textarea"},
+            {"key": "freeNote", "label": "その他、気になる症状や相談したい事柄", "type": "textarea"},
         ],
     },
 }
@@ -603,12 +624,13 @@ def checkin_register():
     patient_id = str(payload.get("id", "")).strip()
     name = str(payload.get("name", "")).strip()
     dob = str(payload.get("dob", "")).strip()
+    gender = str(payload.get("gender", "")).strip()
     form_type = str(payload.get("type", "general")).strip() or "general"
 
     if not patient_id:
         return _cors(("patient id required", 400))
 
-    upsert_directory(patient_id, name, dob)
+    upsert_directory(patient_id, name, dob, gender)
     token = create_token(patient_id, form_type)
 
     resp = jsonify(
@@ -815,17 +837,695 @@ FORM_PAGE = """
 """
 
 
+UROLOGY_FORM_PAGE = """
+<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>泌尿器科 一般問診</title>
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;background:#f4f6f8;
+       margin:0;padding:16px;color:#222;}
+  h1{font-size:19px;text-align:center;margin:8px 0 20px;}
+  form{max-width:640px;margin:0 auto;}
+  .section{background:#fff;border-radius:10px;padding:14px 16px;margin-bottom:12px;
+         box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+  .section.hidden{display:none;}
+  label.field-label{display:block;font-weight:bold;margin-bottom:8px;font-size:14px;}
+  .sub-label{display:block;font-weight:normal;margin:10px 0 6px;font-size:13px;color:#555;}
+  textarea,input[type=text],input[type=number],input[type=date]{width:100%;font-size:15px;padding:9px;
+       border:1px solid #ccc;border-radius:6px;font-family:inherit;}
+  textarea{min-height:60px;resize:vertical;}
+  .radio-group{display:flex;flex-wrap:wrap;gap:8px;}
+  .radio-group label{flex:1 1 auto;text-align:center;padding:9px 10px;border:1px solid #bbb;
+       border-radius:20px;background:#fafafa;cursor:pointer;font-size:13px;user-select:none;}
+  .radio-group input{display:none;}
+  .radio-group label.checked{background:#2e7d32;color:#fff;border-color:#2e7d32;}
+  .checkbox-group{display:flex;flex-direction:column;gap:6px;}
+  .checkbox-group label{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #bbb;
+       border-radius:8px;background:#fafafa;cursor:pointer;font-size:13px;}
+  .checkbox-group input{width:16px;height:16px;flex-shrink:0;}
+  .checkbox-group label.checked{background:#e8f5e9;border-color:#2e7d32;}
+  .sub-fields{margin-top:10px;padding:10px;background:#f7f7f2;border-radius:8px;display:none;}
+  .sub-fields.show{display:block;}
+  .row2{display:flex;gap:8px;}
+  .row2 .field-mini{flex:1;}
+  .field-mini label{display:block;font-size:12px;color:#666;margin-bottom:4px;}
+  .hint{font-size:12px;color:#777;margin-bottom:8px;}
+  .score-q{margin-bottom:12px;}
+  .score-q .q-text{font-weight:bold;font-size:13px;display:block;margin-bottom:6px;}
+  .score-total{background:#eef4ff;border-radius:8px;padding:10px;margin-top:10px;font-size:13px;
+       display:flex;justify-content:space-between;font-weight:bold;color:#0c447c;}
+  button.submit-btn{display:block;width:100%;padding:14px;font-size:16px;font-weight:bold;
+       color:#fff;background:#1565c0;border:none;border-radius:10px;margin-top:16px;cursor:pointer;}
+  .req{color:#c62828;font-size:12px;margin-left:4px;}
+  .invalid{outline:2px solid #c62828;outline-offset:2px;}
+  .error-msg{color:#c62828;font-size:12px;margin-top:6px;display:none;}
+  .error-msg.show{display:block;}
+  .done{max-width:640px;margin:60px auto;text-align:center;font-size:18px;}
+</style></head><body>
+{% if saved %}
+  <div class="done"><p>✅ ご回答ありがとうございました。</p><p>受付にお声がけください。</p></div>
+{% elif error %}
+  <div class="done">{{ error }}</div>
+{% else %}
+<h1>泌尿器科 一般問診</h1>
+<form method="post" action="{{ url_for('submit_urology') }}" id="uroForm">
+  <input type="hidden" name="token" value="{{ token }}">
+
+  <div class="section">
+    <label class="field-label">お手元の番号札の番号を入力してください<span class="req">必須</span></label>
+    <input type="number" name="ticketNumber" id="ticketNumber" inputmode="numeric" placeholder="例: 12">
+    <div class="error-msg" id="err_ticketNumber">番号札の番号を入力してください</div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">治療中もしくは過去に治療をした病気はありますか<span class="req">必須</span></label>
+    <div class="radio-group" data-group="pastIllnessStatus">
+      <label><input type="radio" name="pastIllnessStatus" value="前回受診時と同様"><span>前回受診時と同様</span></label>
+      <label><input type="radio" name="pastIllnessStatus" value="ない"><span>ない</span></label>
+      <label><input type="radio" name="pastIllnessStatus" value="ある"><span>ある</span></label>
+    </div>
+    <div class="error-msg" id="err_pastIllnessStatus">回答を選択してください</div>
+    <div class="sub-fields" id="pastIllnessSub">
+      <div class="checkbox-group" id="pastIllnessList">
+        <label><input type="checkbox" name="pastIllnessItems" value="尿管結石"><span>尿管結石</span></label>
+        <label><input type="checkbox" name="pastIllnessItems" value="緑内障"><span>緑内障</span></label>
+        <label><input type="checkbox" name="pastIllnessItems" value="糖尿病"><span>糖尿病</span></label>
+        <label><input type="checkbox" name="pastIllnessItems" value="高血圧"><span>高血圧</span></label>
+        <label><input type="checkbox" name="pastIllnessItems" value="狭心症"><span>狭心症</span></label>
+        <label><input type="checkbox" name="pastIllnessItems" value="不整脈"><span>不整脈</span></label>
+        <label><input type="checkbox" name="pastIllnessItems" value="脳卒中"><span>脳卒中</span></label>
+        <label><input type="checkbox" name="pastIllnessItems" value="透析"><span>透析</span></label>
+        <label class="other-toggle"><input type="checkbox" name="pastIllnessItems" value="その他"><span>その他</span></label>
+      </div>
+      <input type="text" name="pastIllnessOtherDetail" id="pastIllnessOtherDetail" placeholder="その他の病名を入力" style="margin-top:8px;display:none;">
+    </div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">現在飲んでいるお薬はありますか<span class="req">必須</span></label>
+    <div class="radio-group" data-group="medicationStatus">
+      <label><input type="radio" name="medicationStatus" value="前回受診時と同様"><span>前回受診時と同様</span></label>
+      <label><input type="radio" name="medicationStatus" value="ない"><span>ない</span></label>
+      <label><input type="radio" name="medicationStatus" value="ある"><span>ある</span></label>
+    </div>
+    <div class="error-msg" id="err_medicationStatus">回答を選択してください</div>
+    <div class="sub-fields" id="medicationSub">
+      <span class="sub-label">お薬手帳を提出しましたか</span>
+      <div class="radio-group" data-group="medicationBook">
+        <label><input type="radio" name="medicationBook" value="はい"><span>はい</span></label>
+        <label><input type="radio" name="medicationBook" value="いいえ"><span>いいえ</span></label>
+      </div>
+      <div class="sub-fields" id="medicationDetailSub">
+        <input type="text" name="medicationDetail" id="medicationDetail" placeholder="薬品名をご記入ください">
+      </div>
+    </div>
+  </div>
+
+  <div class="section hidden" id="agaSection">
+    <label class="field-label">AGA(男性型脱毛症)の治療薬を服用していますか<span class="req">必須</span></label>
+    <div class="radio-group" data-group="agaStatus">
+      <label><input type="radio" name="agaStatus" value="いいえ"><span>いいえ</span></label>
+      <label><input type="radio" name="agaStatus" value="はい"><span>はい</span></label>
+    </div>
+    <div class="error-msg" id="err_agaStatus">回答を選択してください</div>
+    <div class="sub-fields" id="agaSub">
+      <input type="text" name="agaDetail" id="agaDetail" placeholder="薬品名をご記入ください">
+    </div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">ご家族(血縁者)にがんの方はいますか<span class="req">必須</span></label>
+    <div class="radio-group" data-group="familyCancerStatus">
+      <label><input type="radio" name="familyCancerStatus" value="前回受診時と同様"><span>前回受診時と同様</span></label>
+      <label><input type="radio" name="familyCancerStatus" value="いない"><span>いない</span></label>
+      <label><input type="radio" name="familyCancerStatus" value="はい"><span>はい</span></label>
+    </div>
+    <div class="error-msg" id="err_familyCancerStatus">回答を選択してください</div>
+    <div class="sub-fields" id="familyCancerSub">
+      <div class="checkbox-group" id="familyCancerList">
+        <label><input type="checkbox" name="familyCancerItems" value="前立腺がん"><span>前立腺がん</span></label>
+        <label><input type="checkbox" name="familyCancerItems" value="膵がん"><span>膵がん</span></label>
+        <label><input type="checkbox" name="familyCancerItems" value="乳がん"><span>乳がん</span></label>
+        <label><input type="checkbox" name="familyCancerItems" value="卵巣がん"><span>卵巣がん</span></label>
+        <label class="other-toggle"><input type="checkbox" name="familyCancerItems" value="その他"><span>その他</span></label>
+      </div>
+      <input type="text" name="familyCancerOtherDetail" id="familyCancerOtherDetail" placeholder="その他の詳細" style="margin-top:8px;display:none;">
+    </div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">薬のアレルギーはありますか<span class="req">必須</span></label>
+    <div class="radio-group" data-group="allergyStatus">
+      <label><input type="radio" name="allergyStatus" value="前回受診時と同様"><span>前回受診時と同様</span></label>
+      <label><input type="radio" name="allergyStatus" value="ない"><span>ない</span></label>
+      <label><input type="radio" name="allergyStatus" value="ある"><span>ある</span></label>
+    </div>
+    <div class="error-msg" id="err_allergyStatus">回答を選択してください</div>
+    <div class="sub-fields" id="allergySub">
+      <input type="text" name="allergyDetail" id="allergyDetail" placeholder="薬品名をご記入ください">
+    </div>
+  </div>
+
+  <div class="section hidden" id="lifestyleSection">
+    <label class="field-label">飲酒・喫煙について<span class="req">必須</span></label>
+    <span class="sub-label">飲酒はされますか</span>
+    <div class="radio-group" data-group="alcohol">
+      <label><input type="radio" name="alcohol" value="飲まない"><span>飲まない</span></label>
+      <label><input type="radio" name="alcohol" value="たまに飲む"><span>たまに飲む</span></label>
+      <label><input type="radio" name="alcohol" value="ほぼ毎日飲む"><span>ほぼ毎日飲む</span></label>
+    </div>
+    <div class="error-msg" id="err_alcohol">回答を選択してください</div>
+    <span class="sub-label">喫煙はされますか</span>
+    <div class="radio-group" data-group="smoking">
+      <label><input type="radio" name="smoking" value="吸わない"><span>吸わない</span></label>
+      <label><input type="radio" name="smoking" value="吸う"><span>吸う</span></label>
+      <label><input type="radio" name="smoking" value="禁煙中"><span>禁煙中</span></label>
+    </div>
+    <div class="error-msg" id="err_smoking">回答を選択してください</div>
+    <div class="sub-fields" id="smokeActiveSub">
+      <div class="row2">
+        <div class="field-mini"><label>1日平均(本)</label><input type="number" name="smokeActivePerDay" id="smokeActivePerDay"></div>
+        <div class="field-mini"><label>開始年齢(歳)</label><input type="number" name="smokeActiveStartAge" id="smokeActiveStartAge"></div>
+        <div class="field-mini"><label>喫煙年数(自動計算)</label><input type="text" name="smokeActiveYears" id="smokeActiveYears" readonly></div>
+      </div>
+    </div>
+    <div class="sub-fields" id="smokeQuitSub">
+      <div class="row2">
+        <div class="field-mini"><label>1日平均(本)</label><input type="number" name="smokeQuitPerDay" id="smokeQuitPerDay"></div>
+        <div class="field-mini"><label>開始年齢(歳)</label><input type="number" name="smokeQuitStartAge" id="smokeQuitStartAge"></div>
+        <div class="field-mini"><label>終了年齢(歳)</label><input type="number" name="smokeQuitEndAge" id="smokeQuitEndAge"></div>
+      </div>
+      <div class="field-mini" style="margin-top:8px;max-width:160px;"><label>喫煙年数(自動計算)</label><input type="text" name="smokeQuitYears" id="smokeQuitYears" readonly></div>
+    </div>
+  </div>
+
+  <div class="section hidden" id="femaleSection">
+    <label class="field-label">女性の方にお聞きします<span class="req">必須</span></label>
+    <span class="sub-label">妊娠中ですか</span>
+    <div class="radio-group" data-group="pregnant">
+      <label><input type="radio" name="pregnant" value="いいえ"><span>いいえ</span></label>
+      <label><input type="radio" name="pregnant" value="可能性あり"><span>可能性あり</span></label>
+      <label><input type="radio" name="pregnant" value="はい"><span>はい</span></label>
+    </div>
+    <div class="error-msg" id="err_pregnant">回答を選択してください</div>
+    <div class="sub-fields" id="pregnantWeekSub">
+      <div class="field-mini" style="max-width:160px;"><label>妊娠週数(週目)</label><input type="number" name="pregnantWeek" id="pregnantWeek"></div>
+    </div>
+    <span class="sub-label">授乳中ですか</span>
+    <div class="radio-group" data-group="breastfeeding">
+      <label><input type="radio" name="breastfeeding" value="いいえ"><span>いいえ</span></label>
+      <label><input type="radio" name="breastfeeding" value="はい"><span>はい</span></label>
+    </div>
+    <div class="error-msg" id="err_breastfeeding">回答を選択してください</div>
+    <span class="sub-label">生理中ですか</span>
+    <div class="radio-group" data-group="menstruating">
+      <label><input type="radio" name="menstruating" value="いいえ"><span>いいえ</span></label>
+      <label><input type="radio" name="menstruating" value="はい"><span>はい</span></label>
+    </div>
+    <div class="error-msg" id="err_menstruating">回答を選択してください</div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">症状はいつからですか<span class="req">必須</span></label>
+    <input type="text" name="symptomOnset" id="symptomOnset" placeholder="例: 3日前から、1週間前から">
+    <div class="error-msg" id="err_symptomOnset">症状はいつからか入力してください</div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">熱はありますか<span class="req">必須</span></label>
+    <div class="radio-group" data-group="feverStatus">
+      <label><input type="radio" name="feverStatus" value="ない"><span>ない</span></label>
+      <label><input type="radio" name="feverStatus" value="ある"><span>ある</span></label>
+    </div>
+    <div class="error-msg" id="err_feverStatus">回答を選択してください</div>
+    <div class="sub-fields" id="feverSub">
+      <div class="row2">
+        <div class="field-mini"><label>いつから</label><input type="date" name="feverFrom" id="feverFrom"></div>
+        <div class="field-mini"><label>いつまで</label><input type="date" name="feverTo" id="feverTo"></div>
+      </div>
+      <div class="field-mini" style="margin-top:8px;max-width:160px;"><label>最高体温(℃)</label><input type="number" step="0.1" name="feverMaxTemp" id="feverMaxTemp"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">今日はどうされましたか(当てはまるものをすべて選択)<span class="req">必須</span></label>
+
+    <span class="sub-label">尿のトラブル</span>
+    <div class="checkbox-group">
+      <label class="symptom-item" data-key="urinaryIncontinence"><input type="checkbox" name="symptoms" value="尿が漏れる"><span>尿が漏れる</span></label>
+      <label class="symptom-item" data-key="residualUrine"><input type="checkbox" name="symptoms" value="残尿感がある"><span>残尿感がある</span></label>
+      <label class="symptom-item" data-key="difficultyUrinating"><input type="checkbox" name="symptoms" value="尿が出にくい"><span>尿が出にくい</span></label>
+      <label class="symptom-item" data-key="frequentUrination"><input type="checkbox" name="symptoms" value="頻尿"><span>頻尿</span></label>
+      <label class="symptom-item" data-key="painfulUrination"><input type="checkbox" name="symptoms" value="排尿時の痛み"><span>排尿時の痛み</span></label>
+      <label class="symptom-item" data-key="urethralDischarge"><input type="checkbox" name="symptoms" value="尿道の違和感・膿が出る"><span>尿道の違和感・膿が出る</span></label>
+    </div>
+    <div class="error-msg" id="err_symptoms">少なくとも1つ選択してください</div>
+
+    <span class="sub-label">その他の症状</span>
+    <div class="checkbox-group">
+      <label class="symptom-item" data-key="backPain"><input type="checkbox" name="symptoms" value="背中の痛み"><span>背中の痛み</span></label>
+    </div>
+    <div class="sub-fields" id="backPainSub">
+      <div class="radio-group" data-group="backPainSide">
+        <label><input type="radio" name="backPainSide" value="左"><span>左</span></label>
+        <label><input type="radio" name="backPainSide" value="右"><span>右</span></label>
+        <label><input type="radio" name="backPainSide" value="全体"><span>全体</span></label>
+      </div>
+    </div>
+
+    <div class="checkbox-group" style="margin-top:6px;">
+      <label class="symptom-item" data-key="groinPain"><input type="checkbox" name="symptoms" value="鼠径部の痛み"><span>鼠径部の痛み</span></label>
+      <label class="symptom-item" data-key="bloodUrine"><input type="checkbox" name="symptoms" value="血尿"><span>血尿</span></label>
+      <label class="symptom-item" data-key="testicleDiscomfort"><input type="checkbox" name="symptoms" value="睾丸の違和感"><span>睾丸の違和感</span></label>
+    </div>
+    <div class="sub-fields" id="testicleDiscomfortSub">
+      <div class="radio-group" data-group="testicleDiscomfortType">
+        <label><input type="radio" name="testicleDiscomfortType" value="腫れ"><span>腫れ</span></label>
+        <label><input type="radio" name="testicleDiscomfortType" value="痛み"><span>痛み</span></label>
+      </div>
+    </div>
+
+    <div class="checkbox-group" style="margin-top:6px;">
+      <label class="symptom-item" data-key="semenBlood"><input type="checkbox" name="symptoms" value="精液に血が混じる"><span>精液に血が混じる</span></label>
+      <label class="symptom-item" data-key="stdConcern"><input type="checkbox" name="symptoms" value="性感染症が気になる"><span>性感染症が気になる</span></label>
+    </div>
+    <div class="sub-fields" id="stdConcernSub">
+      <div class="checkbox-group">
+        <label class="std-detail"><input type="checkbox" name="stdConcernDetail" value="気になる症状がある"><span>気になる症状がある</span></label>
+        <label class="std-detail"><input type="checkbox" name="stdConcernDetail" value="症状はない"><span>症状はない</span></label>
+        <label class="std-detail std-partner"><input type="checkbox" name="stdConcernDetail" value="パートナーが性感染症に罹った"><span>パートナーが性感染症に罹った</span></label>
+      </div>
+      <div class="sub-fields" id="stdDiseaseDetailSub">
+        <input type="text" name="stdDiseaseDetail" id="stdDiseaseDetail" placeholder="病名がわかる場合は入力してください">
+      </div>
+    </div>
+
+    <div class="checkbox-group" style="margin-top:6px;">
+      <label class="symptom-item" data-key="dischargeAbnormality"><input type="checkbox" name="symptoms" value="おりものの異常"><span>おりものの異常</span></label>
+      <label class="symptom-item" data-key="genitalItch"><input type="checkbox" name="symptoms" value="陰部のかゆみ"><span>陰部のかゆみ</span></label>
+      <label class="symptom-item" data-key="maleMenopause"><input type="checkbox" name="symptoms" value="男性更年期が気になる"><span>男性更年期が気になる</span></label>
+      <label class="symptom-item" data-key="checkupAbnormality"><input type="checkbox" name="symptoms" value="健康診断で異常を指摘された"><span>健康診断で異常を指摘された</span></label>
+    </div>
+    <div class="sub-fields" id="checkupAbnormalitySub">
+      <input type="text" name="checkupAbnormalityDetail" id="checkupAbnormalityDetail" placeholder="指摘された項目がわかる場合は入力してください">
+    </div>
+
+    <span class="sub-label">自由診療</span>
+    <div class="checkbox-group">
+      <label class="symptom-item" data-key="bridalCheck"><input type="checkbox" name="symptoms" value="ブライダルチェック(自費の性感染症検査)"><span>ブライダルチェック(自費の性感染症検査)</span></label>
+      <label class="symptom-item" data-key="semenTest"><input type="checkbox" name="symptoms" value="精液検査"><span>精液検査</span></label>
+      <label class="symptom-item" data-key="ed"><input type="checkbox" name="symptoms" value="ED(勃起不全)"><span>ED(勃起不全)</span></label>
+      <label class="symptom-item" data-key="agaSymptom"><input type="checkbox" name="symptoms" value="AGA(男性型脱毛症)"><span>AGA(男性型脱毛症)</span></label>
+      <label class="symptom-item" data-key="hairLoss"><input type="checkbox" name="symptoms" value="脱毛"><span>脱毛</span></label>
+      <label class="symptom-item" data-key="freeInjection"><input type="checkbox" name="symptoms" value="自由注射"><span>自由注射</span></label>
+    </div>
+    <div class="sub-fields" id="freeInjectionSub">
+      <div class="checkbox-group">
+        <label><input type="checkbox" name="freeInjectionItems" value="にんにく注射"><span>にんにく注射</span></label>
+        <label><input type="checkbox" name="freeInjectionItems" value="プラセンタ注射"><span>プラセンタ注射</span></label>
+        <label><input type="checkbox" name="freeInjectionItems" value="白玉注射"><span>白玉注射</span></label>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">その他、気になる症状や相談したい事柄がありましたら入力してください</label>
+    <textarea name="freeNote" id="freeNote"></textarea>
+  </div>
+
+  <div class="section hidden" id="voidingTriggerFinalSection">
+    <label class="field-label" id="voidingTriggerFinalLabel">の症状は以前から気になりますか<span class="req">必須</span></label>
+    <div class="radio-group" data-group="voidingOneWeekPlus">
+      <label><input type="radio" name="voidingOneWeekPlus" value="いいえ"><span>いいえ</span></label>
+      <label><input type="radio" name="voidingOneWeekPlus" value="はい"><span>はい</span></label>
+    </div>
+    <div class="error-msg" id="err_voidingOneWeekPlus">回答を選択してください</div>
+  </div>
+
+  <div class="section hidden" id="voidingSection">
+    <label class="field-label">排尿チェックシート(IPSS / OABSS)</label>
+    <div class="hint">この1週間の状態について、最も近いものを選んでください。</div>
+    <div id="ipssContainer"></div>
+    <div class="score-total"><span>IPSS合計点</span><span id="ipssTotal">0 / 35点</span></div>
+    <div class="score-total"><span>QOLスコア</span><span id="ipssQol">0 / 6点</span></div>
+    <div id="oabssContainer" style="margin-top:16px;"></div>
+    <div class="score-total"><span>OABSS合計点</span><span id="oabssTotal">0 / 15点</span></div>
+  </div>
+
+  <button type="submit" class="submit-btn">回答を送信する</button>
+</form>
+{% endif %}
+
+<script>
+const REAL_GENDER = {{ gender|tojson }};
+const REAL_AGE = {{ age }};
+
+function $(id){ return document.getElementById(id); }
+function radioValue(name){
+  const el = document.querySelector(`input[name="${name}"]:checked`);
+  return el ? el.value : null;
+}
+function toggle(el, show){ if (el) el.classList.toggle('show', show); }
+function toggleSection(el, show){ if (el) el.classList.toggle('hidden', !show); }
+function checkedOf(key){
+  const item = document.querySelector(`.symptom-item[data-key="${key}"]`);
+  return item ? item.querySelector('input').checked : false;
+}
+function showError(key, show){
+  const err = $('err_' + key);
+  if (err) err.classList.toggle('show', show);
+}
+
+document.querySelectorAll('.radio-group').forEach(group => {
+  group.addEventListener('click', e => {
+    const label = e.target.closest('label');
+    if (!label) return;
+    group.querySelectorAll('label').forEach(l => l.classList.remove('checked'));
+    label.classList.add('checked');
+    const key = group.dataset.group;
+    if (key) showError(key, false);
+    handleConditionals();
+  });
+});
+document.querySelectorAll('.checkbox-group label').forEach(label => {
+  label.addEventListener('click', () => {
+    setTimeout(() => {
+      const input = label.querySelector('input');
+      label.classList.toggle('checked', input.checked);
+      if (label.classList.contains('symptom-item')) showError('symptoms', false);
+      handleConditionals();
+    }, 0);
+  });
+});
+$('ticketNumber') && $('ticketNumber').addEventListener('input', () => showError('ticketNumber', false));
+$('symptomOnset') && $('symptomOnset').addEventListener('input', () => showError('symptomOnset', false));
+
+document.querySelectorAll('#pastIllnessList .other-toggle input').forEach(el => {
+  el.addEventListener('change', () => {
+    $('pastIllnessOtherDetail').style.display = el.checked ? 'block' : 'none';
+  });
+});
+document.querySelectorAll('#familyCancerList .other-toggle input').forEach(el => {
+  el.addEventListener('change', () => {
+    $('familyCancerOtherDetail').style.display = el.checked ? 'block' : 'none';
+  });
+});
+
+const freqOptions5 = ['まったくなかった','5回に1回未満','2回に1回未満','2回に1回くらい','2回に1回以上','ほとんどいつも'];
+const nightOptions = ['0回','1回','2回','3回','4回','5回以上'];
+const ipssQuestions = [
+  { key:'ipss_residual', label:'残尿感:排尿後に尿が残っている感じがありましたか', options: freqOptions5 },
+  { key:'ipss_frequency', label:'頻尿:排尿後2時間以内にもう一度、排尿しなければならないことがありましたか', options: freqOptions5 },
+  { key:'ipss_intermittency', label:'尿線途絶:排尿の途中で尿が途切れることがありましたか', options: freqOptions5 },
+  { key:'ipss_urgency', label:'尿意切迫感:尿を我慢するのが難しいことがありましたか', options: freqOptions5 },
+  { key:'ipss_weak_stream', label:'尿線細少:尿の勢いが弱いことがありましたか', options: freqOptions5 },
+  { key:'ipss_straining', label:'腹圧排尿:尿を出し始めるためにお腹に力を入れることがありましたか', options: freqOptions5 },
+  { key:'ipss_nocturia', label:'夜間頻尿:夜寝てから朝起きるまでに、何回くらい排尿に起きましたか', options: nightOptions }
+];
+const ipssQolQ = { key:'ipss_qol', label:'QOL:現在の尿の状態がこのまま変わらずに続くとしたら、あなたはどう思いますか',
+  options:['とても満足','満足','まあ満足','どちらともいえない','やや不満','いやだ','とても悪い'] };
+const oabssQuestions = [
+  { key:'oabss_daytime', label:'朝起きた時から夜寝るまでに、何回くらい尿をしましたか(頻度尿)', options:['7回以下','8〜14回','15回以上'] },
+  { key:'oabss_nighttime', label:'夜寝てから朝起きるまでに、何回くらい尿をするために起きましたか(夜間排尿)', options:['0回','1回','2回','3回以上'] },
+  { key:'oabss_urgency', label:'急に尿がしたくなり、我慢が難しいことがありましたか(尿意切迫感)', options:['なし','週に1回より少ない','週に1回以上','1日1回くらい','1日2〜4回','1日5回以上'] },
+  { key:'oabss_incontinence', label:'急に尿意を感じ、我慢できずに尿が漏れることがありましたか(切迫性尿失禁)', options:['なし','週に1回より少ない','週に1回以上','1日1回くらい','1日2〜4回','1日5回以上'] }
+];
+
+function buildScoreQuestions(container, questions){
+  if (!container) return;
+  container.innerHTML = '';
+  questions.forEach(q => {
+    const div = document.createElement('div');
+    div.className = 'score-q';
+    let html = `<span class="q-text">${q.label}</span><div class="radio-group" data-group="${q.key}">`;
+    q.options.forEach((opt, i) => {
+      html += `<label><input type="radio" name="${q.key}" value="${i}"><span>${opt}</span></label>`;
+    });
+    html += '</div>';
+    div.innerHTML = html;
+    container.appendChild(div);
+  });
+  container.querySelectorAll('.radio-group').forEach(group => {
+    group.addEventListener('click', e => {
+      const label = e.target.closest('label');
+      if (!label) return;
+      group.querySelectorAll('label').forEach(l => l.classList.remove('checked'));
+      label.classList.add('checked');
+      updateScores();
+    });
+  });
+}
+if ($('ipssContainer')) {
+  buildScoreQuestions($('ipssContainer'), ipssQuestions.concat([ipssQolQ]));
+  buildScoreQuestions($('oabssContainer'), oabssQuestions);
+}
+
+function sumScore(questions){
+  let total = 0;
+  questions.forEach(q => {
+    const v = radioValue(q.key);
+    if (v !== null) total += parseInt(v, 10);
+  });
+  return total;
+}
+function updateScores(){
+  $('ipssTotal').textContent = sumScore(ipssQuestions) + ' / 35点';
+  const qol = radioValue('ipss_qol');
+  $('ipssQol').textContent = (qol === null ? 0 : qol) + ' / 6点';
+  $('oabssTotal').textContent = sumScore(oabssQuestions) + ' / 15点';
+}
+
+function calcYears(start, end){
+  const s = parseInt(start, 10), e = parseInt(end, 10);
+  if (isNaN(s) || isNaN(e) || e < s) return '';
+  return String(e - s);
+}
+function updateSmokingYears(){
+  $('smokeActiveYears').value = calcYears($('smokeActiveStartAge').value, REAL_AGE);
+  $('smokeQuitYears').value = calcYears($('smokeQuitStartAge').value, $('smokeQuitEndAge').value);
+}
+['smokeActiveStartAge','smokeQuitStartAge','smokeQuitEndAge'].forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener('input', updateSmokingYears);
+});
+
+function handleConditionals(){
+  toggle($('pastIllnessSub'), radioValue('pastIllnessStatus') === 'ある');
+  toggle($('medicationSub'), radioValue('medicationStatus') === 'ある');
+  toggle($('medicationDetailSub'), radioValue('medicationBook') === 'いいえ');
+
+  toggleSection($('agaSection'), REAL_GENDER === '男');
+  toggle($('agaSub'), radioValue('agaStatus') === 'はい');
+
+  toggle($('familyCancerSub'), radioValue('familyCancerStatus') === 'はい');
+  toggle($('allergySub'), radioValue('allergyStatus') === 'ある');
+
+  toggleSection($('lifestyleSection'), REAL_AGE >= 20);
+  toggle($('smokeActiveSub'), radioValue('smoking') === '吸う');
+  toggle($('smokeQuitSub'), radioValue('smoking') === '禁煙中');
+  updateSmokingYears();
+
+  toggleSection($('femaleSection'), REAL_GENDER === '女');
+  toggle($('pregnantWeekSub'), radioValue('pregnant') === 'はい');
+
+  toggle($('feverSub'), radioValue('feverStatus') === 'ある');
+
+  const voidingTriggerKeys = ['urinaryIncontinence','residualUrine','difficultyUrinating','frequentUrination'];
+  const triggerLabels = { urinaryIncontinence:'尿が漏れる', residualUrine:'残尿感がある', difficultyUrinating:'尿が出にくい', frequentUrination:'頻尿' };
+  const checkedTriggers = voidingTriggerKeys.filter(checkedOf);
+  const voidingTriggerChecked = checkedTriggers.length > 0;
+  toggleSection($('voidingTriggerFinalSection'), voidingTriggerChecked);
+  if (voidingTriggerChecked) {
+    $('voidingTriggerFinalLabel').innerHTML =
+      `「${checkedTriggers.map(k => triggerLabels[k]).join('、')}」の症状は以前から気になりますか<span class="req">必須</span>`;
+  }
+
+  const maleMenopauseChecked = checkedOf('maleMenopause');
+  const showVoiding = (voidingTriggerChecked && radioValue('voidingOneWeekPlus') === 'はい') || maleMenopauseChecked;
+  toggleSection($('voidingSection'), showVoiding);
+
+  toggle($('backPainSub'), checkedOf('backPain'));
+  toggle($('testicleDiscomfortSub'), checkedOf('testicleDiscomfort'));
+  toggle($('stdConcernSub'), checkedOf('stdConcern'));
+  const partnerCb = document.querySelector('.std-partner input');
+  toggle($('stdDiseaseDetailSub'), partnerCb ? partnerCb.checked : false);
+  toggle($('checkupAbnormalitySub'), checkedOf('checkupAbnormality'));
+  toggle($('freeInjectionSub'), checkedOf('freeInjection'));
+}
+if ($('uroForm')) handleConditionals();
+
+function validateForm(){
+  let firstInvalidEl = null;
+  let ok = true;
+  function check(key, passed, scrollEl){
+    showError(key, !passed);
+    if (!passed){
+      ok = false;
+      if (!firstInvalidEl) firstInvalidEl = scrollEl;
+    }
+  }
+
+  check('ticketNumber', $('ticketNumber').value.trim() !== '', $('ticketNumber').closest('.section'));
+  check('pastIllnessStatus', radioValue('pastIllnessStatus') !== null, document.querySelector('[data-group="pastIllnessStatus"]').closest('.section'));
+  check('medicationStatus', radioValue('medicationStatus') !== null, document.querySelector('[data-group="medicationStatus"]').closest('.section'));
+
+  if (REAL_GENDER === '男') {
+    check('agaStatus', radioValue('agaStatus') !== null, $('agaSection'));
+  } else {
+    showError('agaStatus', false);
+  }
+
+  check('familyCancerStatus', radioValue('familyCancerStatus') !== null, document.querySelector('[data-group="familyCancerStatus"]').closest('.section'));
+  check('allergyStatus', radioValue('allergyStatus') !== null, document.querySelector('[data-group="allergyStatus"]').closest('.section'));
+
+  if (REAL_AGE >= 20) {
+    check('alcohol', radioValue('alcohol') !== null, $('lifestyleSection'));
+    check('smoking', radioValue('smoking') !== null, $('lifestyleSection'));
+  } else {
+    showError('alcohol', false);
+    showError('smoking', false);
+  }
+
+  if (REAL_GENDER === '女') {
+    check('pregnant', radioValue('pregnant') !== null, $('femaleSection'));
+    check('breastfeeding', radioValue('breastfeeding') !== null, $('femaleSection'));
+    check('menstruating', radioValue('menstruating') !== null, $('femaleSection'));
+  } else {
+    showError('pregnant', false);
+    showError('breastfeeding', false);
+    showError('menstruating', false);
+  }
+
+  check('symptomOnset', $('symptomOnset').value.trim() !== '', $('symptomOnset').closest('.section'));
+  check('feverStatus', radioValue('feverStatus') !== null, document.querySelector('[data-group="feverStatus"]').closest('.section'));
+  check('symptoms', document.querySelectorAll('.symptom-item input:checked').length > 0, document.querySelector('.symptom-item').closest('.section'));
+
+  if (!$('voidingTriggerFinalSection').classList.contains('hidden')) {
+    check('voidingOneWeekPlus', radioValue('voidingOneWeekPlus') !== null, $('voidingTriggerFinalSection'));
+  } else {
+    showError('voidingOneWeekPlus', false);
+  }
+
+  if (!ok && firstInvalidEl) {
+    firstInvalidEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  return ok;
+}
+
+if ($('uroForm')) {
+  $('uroForm').addEventListener('submit', e => {
+    if (!validateForm()) e.preventDefault();
+  });
+}
+</script>
+</body></html>
+"""
+
+
 @app.route("/form/<token>")
 def form(token):
     patient_id = resolve_token(token)
     form_type = resolve_token_type(token)
-    fields = get_form_fields(form_type)
+
     if not patient_id:
+        fields = get_form_fields(form_type)
         return render_template_string(
             FORM_PAGE, error="このリンクは無効です。受付にお問い合わせください。",
             saved=False, token=token, fields=fields,
         )
+
+    if form_type == "urology_general":
+        entry = lookup_directory(patient_id) or {}
+        gender = entry.get("gender", "") or "男"
+        age = compute_age(entry.get("dob", ""))
+        return render_template_string(
+            UROLOGY_FORM_PAGE, token=token, gender=gender, age=age, saved=False, error=None
+        )
+
+    fields = get_form_fields(form_type)
     return render_template_string(FORM_PAGE, token=token, fields=fields, saved=False, error=None)
+
+
+@app.route("/submit/urology", methods=["POST"])
+def submit_urology():
+    token = request.form.get("token", "").strip()
+    patient_id = resolve_token(token)
+    if not patient_id:
+        return render_template_string(
+            UROLOGY_FORM_PAGE, token=token, gender="男", age=0,
+            saved=False, error="このリンクは無効です。受付にお問い合わせください。",
+        )
+
+    f = request.form
+    record = {
+        "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "form_type": "urology_general",
+        "ticketNumber": f.get("ticketNumber", "").strip(),
+        "pastIllnessStatus": f.get("pastIllnessStatus", ""),
+        "pastIllnessItems": "、".join(f.getlist("pastIllnessItems")),
+        "pastIllnessOtherDetail": f.get("pastIllnessOtherDetail", "").strip(),
+        "medicationStatus": f.get("medicationStatus", ""),
+        "medicationBook": f.get("medicationBook", ""),
+        "medicationDetail": f.get("medicationDetail", "").strip(),
+        "agaStatus": f.get("agaStatus", ""),
+        "agaDetail": f.get("agaDetail", "").strip(),
+        "familyCancerStatus": f.get("familyCancerStatus", ""),
+        "familyCancerItems": "、".join(f.getlist("familyCancerItems")),
+        "familyCancerOtherDetail": f.get("familyCancerOtherDetail", "").strip(),
+        "allergyStatus": f.get("allergyStatus", ""),
+        "allergyDetail": f.get("allergyDetail", "").strip(),
+        "alcohol": f.get("alcohol", ""),
+        "smoking": f.get("smoking", ""),
+        "smokeActivePerDay": f.get("smokeActivePerDay", "").strip(),
+        "smokeActiveStartAge": f.get("smokeActiveStartAge", "").strip(),
+        "smokeActiveYears": f.get("smokeActiveYears", "").strip(),
+        "smokeQuitPerDay": f.get("smokeQuitPerDay", "").strip(),
+        "smokeQuitStartAge": f.get("smokeQuitStartAge", "").strip(),
+        "smokeQuitEndAge": f.get("smokeQuitEndAge", "").strip(),
+        "smokeQuitYears": f.get("smokeQuitYears", "").strip(),
+        "pregnant": f.get("pregnant", ""),
+        "pregnantWeek": f.get("pregnantWeek", "").strip(),
+        "breastfeeding": f.get("breastfeeding", ""),
+        "menstruating": f.get("menstruating", ""),
+        "symptomOnset": f.get("symptomOnset", "").strip(),
+        "feverStatus": f.get("feverStatus", ""),
+        "feverFrom": f.get("feverFrom", "").strip(),
+        "feverTo": f.get("feverTo", "").strip(),
+        "feverMaxTemp": f.get("feverMaxTemp", "").strip(),
+        "symptoms": "、".join(f.getlist("symptoms")),
+        "backPainSide": f.get("backPainSide", ""),
+        "testicleDiscomfortType": f.get("testicleDiscomfortType", ""),
+        "stdConcernDetail": "、".join(f.getlist("stdConcernDetail")),
+        "stdDiseaseDetail": f.get("stdDiseaseDetail", "").strip(),
+        "checkupAbnormalityDetail": f.get("checkupAbnormalityDetail", "").strip(),
+        "freeInjectionItems": "、".join(f.getlist("freeInjectionItems")),
+        "voidingOneWeekPlus": f.get("voidingOneWeekPlus", ""),
+        "freeNote": f.get("freeNote", "").strip(),
+    }
+
+    for k in IPSS_KEYS + ["ipss_qol"] + OABSS_KEYS:
+        record[k] = f.get(k, "")
+
+    record = compute_scores(record, get_form_fields("urology_general"))
+
+    save_record(patient_id, record)
+    return render_template_string(
+        UROLOGY_FORM_PAGE, token=token, gender="男", age=0, saved=True, error=None
+    )
+
+
+def compute_age(dob: str) -> int:
+    try:
+        parts = dob.replace("　", " ").strip().split("/")
+        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+        today = datetime.now()
+        age = today.year - y
+        if (today.month, today.day) < (m, d):
+            age -= 1
+        return age
+    except Exception:
+        return 0
 
 
 IPSS_KEYS = [

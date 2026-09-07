@@ -359,23 +359,52 @@ DASHBOARD_PAGE = """
 <title>問診リンク発行</title>
 <style>
   body{font-family:sans-serif;padding:20px;max-width:520px;margin:0 auto;color:#222;}
-  input{padding:9px;font-size:15px;border:1px solid #ccc;border-radius:6px;}
-  button{padding:9px 16px;font-size:15px;background:#1565c0;color:#fff;border:none;
-         border-radius:6px;cursor:pointer;margin-left:6px;}
+  input,select{padding:9px;font-size:15px;border:1px solid #ccc;border-radius:6px;width:100%;
+       box-sizing:border-box;margin-bottom:8px;}
+  label{font-size:13px;color:#555;display:block;margin-bottom:2px;}
+  button{padding:10px 16px;font-size:15px;background:#1565c0;color:#fff;border:none;
+         border-radius:6px;cursor:pointer;width:100%;margin-top:4px;}
   .result{margin-top:18px;background:#f4f6f8;border-radius:8px;padding:14px;}
   .result a{word-break:break-all;}
   .top a{font-size:13px;}
   img{margin-top:10px;}
+  .hint{font-size:12px;color:#888;margin:-4px 0 10px;}
+  fieldset{border:1px solid #ddd;border-radius:8px;margin:14px 0;padding:10px 12px;}
+  legend{font-size:13px;color:#666;padding:0 6px;}
 </style></head><body>
 <div class="top"><a href="{{ url_for('admin_logout') }}">ログアウト</a></div>
-<h2>問診リンクの発行</h2>
+<h2>問診リンクの発行(テスト・手動発行用)</h2>
 <form method="post">
-  <input type="text" name="patient_id" placeholder="患者ID (例: 2)" required>
+  <label>患者ID</label>
+  <input type="text" name="patient_id" placeholder="例: 2" required>
+
+  <label>問診の種類</label>
+  <select name="form_type">
+    {% for key, val in form_types.items() %}
+      <option value="{{ key }}">{{ val.label }}</option>
+    {% endfor %}
+  </select>
+
+  <fieldset>
+    <legend>テスト用の氏名・生年月日・性別(任意/RS_Baseにアクセスできない時用)</legend>
+    <div class="hint">入力すると、その患者IDの台帳情報として登録されます。空欄なら既存の台帳情報がそのまま使われます。</div>
+    <label>氏名</label>
+    <input type="text" name="test_name" placeholder="例: テスト太郎">
+    <label>生年月日</label>
+    <input type="text" name="test_dob" placeholder="例: 1990/05/20">
+    <label>性別</label>
+    <select name="test_gender">
+      <option value="">(変更しない)</option>
+      <option value="男">男</option>
+      <option value="女">女</option>
+    </select>
+  </fieldset>
+
   <button type="submit">発行</button>
 </form>
 {% if link %}
   <div class="result">
-    <p>患者ID <b>{{ patient_id }}</b> 用のリンクを発行しました。</p>
+    <p>患者ID <b>{{ patient_id }}</b> ({{ form_type_label }}) 用のリンクを発行しました。</p>
     <p><a href="{{ link }}" target="_blank">{{ link }}</a></p>
     <img src="{{ qr_url }}" width="160" height="160" alt="QRコード">
     <p style="font-size:13px;color:#666;">↑ QRコードを印刷・SMS等で患者さんにお渡しください。</p>
@@ -398,14 +427,36 @@ def admin_dashboard():
     link = None
     qr_url = None
     patient_id = None
+    form_type = "general"
+    form_type_label = ""
     if request.method == "POST":
         patient_id = request.form.get("patient_id", "").strip()
+        form_type = request.form.get("form_type", "general").strip() or "general"
+        test_name = request.form.get("test_name", "").strip()
+        test_dob = request.form.get("test_dob", "").strip()
+        test_gender = request.form.get("test_gender", "").strip()
+
         if patient_id:
-            token = create_token(patient_id)
+            if test_name or test_dob or test_gender:
+                existing = lookup_directory(patient_id) or {}
+                upsert_directory(
+                    patient_id,
+                    test_name or existing.get("name", ""),
+                    test_dob or existing.get("dob", ""),
+                    test_gender or existing.get("gender", ""),
+                )
+            token = create_token(patient_id, form_type)
             link = request.host_url.rstrip("/") + f"/form/{token}"
             qr_url = url_for("qr_image", token=token)
+            form_type_label = FORM_TYPES.get(form_type, {}).get("label", form_type)
+
     return render_template_string(
-        DASHBOARD_PAGE, link=link, qr_url=qr_url, patient_id=patient_id
+        DASHBOARD_PAGE,
+        link=link,
+        qr_url=qr_url,
+        patient_id=patient_id,
+        form_types=FORM_TYPES,
+        form_type_label=form_type_label,
     )
 
 

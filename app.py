@@ -641,6 +641,10 @@ def build_karte_text(record):
     if any(record.get(k) not in (None, "") for k in OABSS_KEYS):
         oabss_line = "".join(str(record.get(k, "")) for k in OABSS_KEYS)
 
+    onset = g("symptomOnset")
+    symptoms = g("symptoms")
+    s_line = f"S:{onset}{symptoms}"
+
     lines = [
         "【初診】",
         "＜profile＞",
@@ -651,7 +655,7 @@ def build_karte_text(record):
         "【備考】",
         f"　IPSS：{ipss_line}　OABSS：{oabss_line}",
         "-------------------------------------------",
-        "S:",
+        s_line,
         "O:",
         "<検尿>　",
         "",

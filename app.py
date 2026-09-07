@@ -287,6 +287,32 @@ FORM_TYPES["urology_new"] = {
     ] + FORM_TYPES["urology_general"]["fields"],
 }
 
+ED_DRUG_INFO = {
+    "qty_sildenafil50": {"name": "シルデナフィル(バイアグラ)", "dose": "50mg", "price": 900, "usage": "性行為の約1時間前に服用"},
+    "qty_vardenafil10": {"name": "バルデナフィル(レビトラ)", "dose": "10mg", "price": 1400, "usage": "性行為の約30分前に服用"},
+    "qty_vardenafil20": {"name": "バルデナフィル(レビトラ)", "dose": "20mg", "price": 1600, "usage": "性行為の約30分前に服用"},
+    "qty_tadalafil10": {"name": "タダラフィル(シアリス)", "dose": "10mg", "price": 1200, "usage": "性行為の2〜3時間前に服用"},
+    "qty_tadalafil20": {"name": "タダラフィル(シアリス)", "dose": "20mg", "price": 1400, "usage": "性行為の2〜3時間前に服用"},
+}
+
+FORM_TYPES["ed_followup"] = {
+    "label": "ED再診",
+    "fields": [
+        {"key": "ticketNumber", "label": "番号札", "type": "text"},
+        {"key": "healthEventStatus", "label": "直近半年の健康上のイベント", "type": "text"},
+        {"key": "healthEventDetail", "label": "健康上のイベント(詳細)", "type": "text"},
+        {"key": "sideEffectStatus", "label": "前回処方薬の副作用", "type": "text"},
+        {"key": "precautionsAgree", "label": "注意事項の確認", "type": "text"},
+        {"key": "contraindicationStatus", "label": "禁忌事項への該当", "type": "text"},
+        {"key": "qty_sildenafil50", "label": "シルデナフィル50mg(錠)", "type": "text"},
+        {"key": "qty_vardenafil10", "label": "バルデナフィル10mg(錠)", "type": "text"},
+        {"key": "qty_vardenafil20", "label": "バルデナフィル20mg(錠)", "type": "text"},
+        {"key": "qty_tadalafil10", "label": "タダラフィル10mg(錠)", "type": "text"},
+        {"key": "qty_tadalafil20", "label": "タダラフィル20mg(錠)", "type": "text"},
+        {"key": "edTotalAmount", "label": "合計金額", "type": "text"},
+    ],
+}
+
 
 def get_form_fields(form_type: str):
     return FORM_TYPES.get(form_type, FORM_TYPES["urology_general"])["fields"]
@@ -491,6 +517,9 @@ VIEW_PAGE = """
 <div class="top">
   <a href="{{ url_for('admin_dashboard') }}">← リンク発行に戻る</a>
   <a href="{{ url_for('admin_history', patient_id=patient_id) }}">過去問診一覧</a>
+  {% if latest and latest.form_type == "ed_followup" %}
+    <a href="{{ url_for('admin_print_ed', patient_id=patient_id) }}{% if not is_latest %}?at={{ latest.submitted_at|urlencode }}{% endif %}" target="_blank" style="color:#c62828;font-weight:bold;">🖨 薬袋+問診票を印刷</a>
+  {% endif %}
 </div>
 {% if not records %}
   <div class="empty">この患者(ID: {{ patient_id }})の問診回答はまだありません。</div>
@@ -601,6 +630,129 @@ def build_patient_info_text(record):
     if not record or record.get("form_type") != "urology_new":
         return ""
     return record.get("patientPhone", "") or ""
+
+
+ED_PRINT_PAGE = """
+<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
+<title>ED再診 印刷</title>
+<style>
+  *{box-sizing:border-box;}
+  body{margin:0;background:#ddd;font-family:"Hiragino Mincho ProN",serif;color:#111;}
+  .toolbar{padding:10px;text-align:center;background:#fff;}
+  .toolbar button{padding:10px 20px;font-size:14px;font-weight:bold;background:#1565c0;
+       color:#fff;border:none;border-radius:8px;cursor:pointer;}
+  .bag-page{background:#fff;width:277mm;height:190mm;margin:14px auto;padding:6mm;
+       display:flex;position:relative;box-sizing:border-box;}
+  .bag-page::after{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:1px dashed #999;}
+  .bag-half{flex:1 1 50%;border:1px solid #000;padding:10mm 8mm;margin:2mm;
+       display:flex;flex-direction:column;font-size:11px;overflow:hidden;}
+  .bag-clinic{font-size:15px;font-weight:bold;text-align:center;letter-spacing:.15em;}
+  .bag-divider{border-top:1px solid #000;margin:6px 0;}
+  .bag-patient{font-size:13px;font-weight:bold;text-align:right;margin-bottom:4px;}
+  .bag-meta{font-size:10px;color:#444;text-align:right;margin-bottom:8px;}
+  .bag-drug-item{padding:5px 0;border-bottom:1px dotted #999;font-size:12px;}
+  .bag-drug-name-row{display:flex;justify-content:space-between;}
+  .bag-drug-usage{font-size:10px;color:#333;margin-top:2px;}
+  .bag-footer{display:flex;justify-content:space-between;font-size:10px;margin-top:8px;color:#333;}
+  .bag-info-title{font-size:13px;font-weight:bold;text-align:center;letter-spacing:.1em;}
+  .bag-ticket-line{font-size:12px;font-weight:bold;margin:6px 0 2px;}
+  .pa-section{margin-bottom:7px;}
+  .pa-section h3{font-size:11px;border-bottom:1px solid #999;padding-bottom:2px;margin:5px 0 3px;}
+  .pa-table{width:100%;border-collapse:collapse;font-size:10.5px;}
+  .pa-table td{padding:2px 4px;}
+  .pa-k{color:#444;white-space:nowrap;width:90px;}
+  .pa-list{font-size:10.5px;}
+  @media print {
+    body{background:#fff;}
+    .toolbar{display:none;}
+    .bag-page{margin:0;box-shadow:none;}
+    @page{size:A4 landscape;margin:0;}
+  }
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">🖨 印刷する</button></div>
+<div class="bag-page">
+  <div class="bag-half">
+    <div class="bag-clinic">内服薬</div>
+    <div class="bag-divider"></div>
+    <div class="bag-patient">{{ name or '(氏名未取得)' }}　様</div>
+    <div class="bag-meta">患者ID: {{ patient_id }}　生年月日: {{ dob }}</div>
+    {% if items %}
+      {% for it in items %}
+      <div class="bag-drug-item">
+        <div class="bag-drug-name-row"><span>○ {{ it.name }}　{{ it.dose }}</span><span>{{ it.qty }}錠</span></div>
+        <div class="bag-drug-usage">　{{ it.usage }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="bag-drug-item">(薬剤の記載なし)</div>
+    {% endif %}
+    <div class="bag-divider"></div>
+    <div class="bag-footer">
+      <span>調剤日: {{ today }}</span>
+      <span style="text-align:right;">泌尿器科バウムクリニック<br>TEL:048-241-3300</span>
+    </div>
+  </div>
+  <div class="bag-half">
+    <div class="bag-info-title">問診票</div>
+    <div class="bag-divider"></div>
+    <div class="bag-ticket-line">番号札: {{ record.ticketNumber or '-' }}番</div>
+    <div class="bag-meta" style="text-align:left;">患者ID: {{ patient_id }}　生年月日: {{ dob }}</div>
+    <div class="pa-section">
+      <h3>健康上のイベント(直近半年)</h3>
+      <div class="pa-list">{{ record.healthEventStatus or '未回答' }}{% if record.healthEventDetail %}　{{ record.healthEventDetail }}{% endif %}</div>
+    </div>
+    <div class="pa-section">
+      <h3>前回処方薬の副作用</h3>
+      <div class="pa-list">{{ record.sideEffectStatus or '未回答' }}</div>
+    </div>
+    <div class="pa-section">
+      <h3>注意事項・禁忌事項</h3>
+      <div class="pa-list">確認: {{ record.precautionsAgree or '未確認' }}　／　禁忌: {{ record.contraindicationStatus or '未回答' }}</div>
+    </div>
+    <div class="pa-section">
+      <h3>ご希望の薬剤</h3>
+      <table class="pa-table">
+        <tr><td class="pa-k" style="font-weight:bold;">薬剤名</td><td style="font-weight:bold;">規格</td><td style="font-weight:bold;">錠数</td><td style="font-weight:bold;text-align:right;">小計</td></tr>
+        {% if items %}
+          {% for it in items %}
+          <tr><td class="pa-k">{{ it.name }}</td><td>{{ it.dose }}</td><td>{{ it.qty }}錠</td><td style="text-align:right;">{{ "{:,}".format(it.subtotal) }}円</td></tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="4">選択なし</td></tr>
+        {% endif %}
+      </table>
+      <div class="bag-footer" style="margin-top:6px;"><span></span><span style="font-weight:bold;">合計金額　{{ "{:,}".format(total) }}円</span></div>
+    </div>
+    <div class="bag-footer"><span>調剤日: {{ today }}</span><span></span></div>
+  </div>
+</div>
+</body></html>
+"""
+
+
+def build_ed_print_context(record, patient_id):
+    dir_entry = lookup_directory(patient_id) or {}
+    items = []
+    for key, info in ED_DRUG_INFO.items():
+        try:
+            qty = int(record.get(key, "0") or "0")
+        except ValueError:
+            qty = 0
+        if qty > 0:
+            items.append({
+                "name": info["name"], "dose": info["dose"], "usage": info["usage"],
+                "qty": qty, "subtotal": qty * info["price"],
+            })
+    total = sum(it["subtotal"] for it in items)
+    return {
+        "record": record,
+        "patient_id": patient_id,
+        "name": dir_entry.get("name", ""),
+        "dob": dir_entry.get("dob", ""),
+        "items": items,
+        "total": total,
+        "today": now_jst().strftime("%Y-%m-%d"),
+    }
 
 
 def build_karte_text(record, gender=None, age=None):
@@ -729,6 +881,40 @@ def admin_view(patient_id):
         karte_text=karte_text,
         patient_info_text=patient_info_text,
     )
+
+
+@app.route("/admin/print/ed/<patient_id>")
+@login_required
+def admin_print_ed(patient_id):
+    records = load_records(patient_id)
+    at = request.args.get("at")
+    if at:
+        record = next((r for r in records if r.get("submitted_at") == at), None)
+    else:
+        record = records[-1] if records else None
+    if not record or record.get("form_type") != "ed_followup":
+        return "対象のED再診問診が見つかりません", 404
+    ctx = build_ed_print_context(record, patient_id)
+    return render_template_string(ED_PRINT_PAGE, **ctx)
+
+
+@app.route("/admin/api/print/ed/<patient_id>")
+def api_print_ed(patient_id):
+    if not _staff_authorized():
+        return _cors(("unauthorized", 401))
+    records = load_records(patient_id)
+    at = request.args.get("at")
+    if at:
+        record = next((r for r in records if r.get("submitted_at") == at), None)
+    else:
+        record = records[-1] if records else None
+    if not record or record.get("form_type") != "ed_followup":
+        return _cors(("対象のED再診問診が見つかりません", 404))
+    ctx = build_ed_print_context(record, patient_id)
+    html = render_template_string(ED_PRINT_PAGE, **ctx)
+    resp = app.make_response(html)
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    return _cors(resp)
 
 
 @app.route("/admin/history/<patient_id>")
@@ -2379,6 +2565,296 @@ if ($('uroForm')) {
 """
 
 
+ED_FORM_PAGE = """
+<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>ED薬 問診票(再診)</title>
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;background:#f4f6f8;
+       margin:0;padding:16px;color:#222;}
+  h1{font-size:19px;text-align:center;margin:8px 0 20px;}
+  form{max-width:640px;margin:0 auto;}
+  .section{background:#fff;border-radius:10px;padding:14px 16px;margin-bottom:12px;
+         box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+  label.field-label{display:block;font-weight:bold;margin-bottom:8px;font-size:14px;}
+  textarea,input[type=text],input[type=number]{width:100%;font-size:15px;padding:9px;border:1px solid #ccc;
+       border-radius:6px;font-family:inherit;}
+  textarea{min-height:60px;resize:vertical;}
+  .radio-group{display:flex;flex-wrap:wrap;gap:8px;}
+  .radio-group label{flex:1 1 auto;text-align:center;padding:9px 10px;border:1px solid #bbb;
+       border-radius:20px;background:#fafafa;cursor:pointer;font-size:13px;user-select:none;}
+  .radio-group input{display:none;}
+  .radio-group label.checked{background:#2e7d32;color:#fff;border-color:#2e7d32;}
+  .sub-fields{margin-top:10px;padding:10px;background:#f7f7f2;border-radius:8px;display:none;}
+  .sub-fields.show{display:block;}
+  .note-box{font-size:12.5px;color:#444;background:#fff8e1;border:1px solid #ffe082;
+       border-radius:8px;padding:10px 12px;margin:8px 0;line-height:1.6;}
+  .req{color:#c62828;font-size:12px;margin-left:4px;}
+  .error-msg{color:#c62828;font-size:12px;margin-top:6px;display:none;}
+  .error-msg.show{display:block;}
+  .invalid{outline:2px solid #c62828;outline-offset:2px;}
+  .check-row{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #bbb;border-radius:8px;background:#fafafa;}
+  .check-row input{width:20px;height:20px;}
+  details.drug-index{margin-top:10px;border:1px solid #90caf9;border-radius:8px;background:#e3f2fd;padding:8px 10px;}
+  details.drug-index summary{cursor:pointer;font-size:13px;color:#0d47a1;font-weight:bold;}
+  .drug-search-row{margin-top:10px;}
+  .drug-search-result{font-size:12.5px;margin-top:8px;padding:8px 10px;border-radius:6px;display:none;line-height:1.6;}
+  .drug-search-result.show{display:block;}
+  .drug-search-result.warn{background:#ffebee;color:#b71c1c;border:1px solid #ef9a9a;}
+  .drug-search-result.none{background:#eee;color:#555;}
+  .drug-index-list{max-height:200px;overflow-y:auto;font-size:11.5px;margin-top:10px;line-height:1.8;
+       border-top:1px solid #bbdefb;padding-top:8px;}
+  .idx-kana{font-weight:bold;color:#1565c0;margin-right:6px;}
+  .drug-card{border:1px solid #ccc;border-radius:10px;padding:12px;margin-bottom:10px;}
+  .drug-card-head{font-size:14px;font-weight:bold;margin-bottom:8px;}
+  .drug-brand{font-size:12px;color:#666;font-weight:normal;margin-left:6px;}
+  .drug-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  .drug-dose{font-size:13px;}
+  .drug-price{color:#888;font-size:12px;margin-left:6px;}
+  .drug-qty{display:flex;align-items:center;gap:4px;}
+  .drug-qty input{width:60px;text-align:center;}
+  .drug-info-list{font-size:11.5px;color:#666;margin:6px 0 0;padding-left:18px;line-height:1.7;}
+  .total-box{background:#eef4ff;border-radius:8px;padding:10px;margin-top:8px;
+       display:flex;justify-content:space-between;font-weight:bold;color:#0c447c;}
+  button.submit-btn{display:block;width:100%;padding:14px;font-size:16px;font-weight:bold;
+       color:#fff;background:#1565c0;border:none;border-radius:10px;margin-top:16px;cursor:pointer;}
+  .done{max-width:640px;margin:60px auto;text-align:center;font-size:18px;}
+</style></head><body>
+{% if saved %}
+  <div class="done"><p>✅ ご回答ありがとうございました。</p><p>受付にお声がけください。</p></div>
+{% elif error %}
+  <div class="done">{{ error }}</div>
+{% else %}
+<h1>ED薬 問診票(再診)</h1>
+<form method="post" action="{{ url_for('submit_ed_followup') }}" id="edForm">
+  <input type="hidden" name="token" value="{{ token }}">
+
+  <div class="section">
+    <label class="field-label">お手元の番号札の番号を入力してください<span class="req">必須</span></label>
+    <input type="number" name="ticketNumber" id="ticketNumber" inputmode="numeric" placeholder="例: 12">
+    <div class="error-msg" id="err_ticketNumber">番号札の番号を入力してください</div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">直近の半年間で健康上のイベント(変化や不調、新たな病気)はありましたか<span class="req">必須</span></label>
+    <div class="radio-group" data-group="healthEventStatus">
+      <label><input type="radio" name="healthEventStatus" value="ない"><span>ない</span></label>
+      <label><input type="radio" name="healthEventStatus" value="ある"><span>ある</span></label>
+    </div>
+    <div class="error-msg" id="err_healthEventStatus">回答を選択してください</div>
+    <div class="sub-fields" id="healthEventSub">
+      <textarea name="healthEventDetail" id="healthEventDetail" placeholder="内容をご記入ください"></textarea>
+    </div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">前回処方の薬を服用後、副作用はありましたか<span class="req">必須</span></label>
+    <div class="radio-group" data-group="sideEffectStatus">
+      <label><input type="radio" name="sideEffectStatus" value="ない"><span>ない</span></label>
+      <label><input type="radio" name="sideEffectStatus" value="ある"><span>ある</span></label>
+    </div>
+    <div class="error-msg" id="err_sideEffectStatus">回答を選択してください</div>
+    <div class="note-box">※副作用があった場合は医師の診察により処方の可否を判断します。</div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">注意事項<span class="req">必須</span></label>
+    <div class="note-box">
+      ・4時間以上の勃起の持続を認めた場合には、ただちに医師の診断を受けてください<br>
+      ・めまいや視覚障害が出現する可能性があるため、内服時の運転や機械の操作は避けてください<br>
+      ・投与後に急激な視力低下もしくは視力喪失が出現した場合には、速やかに眼科専門医の診察を受けてください<br>
+      ・65歳以上の方で使用経験のない方は、必ず半錠から開始してください(バルデナフィル20mgは65歳以上の適応がありません)
+    </div>
+    <label class="check-row">
+      <input type="checkbox" name="precautionsAgree" id="precautionsAgree" value="確認済み">
+      <span>上記の注意事項について理解しました</span>
+    </label>
+    <div class="error-msg" id="err_precautionsAgree">注意事項をご確認のうえチェックしてください</div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">禁忌事項<span class="req">必須</span></label>
+    <div class="note-box">
+      ＜禁忌肢＞<br>
+      ・硝酸剤、NO供与剤内服中(薬剤名は下記の一覧をご確認ください)<br>
+      ・脳、心血管系障害の既往が6か月以内にある場合<br>
+      ・性交渉による不利益が大きい可能性のある場合<br>
+      ・重度の肝機能障害を有する場合<br>
+      ・低血圧症、治療による管理がなされていない高血圧症、網膜色素変性症を既往に有する場合<br>
+      ・アミオダロン塩酸塩、sGC刺激剤(リオシグアト)投与中の患者
+    </div>
+
+    <details class="drug-index">
+      <summary>硝酸剤・NO供与剤の薬剤名一覧を見る(該当の判断にご利用ください)</summary>
+      <div class="drug-search-row">
+        <input type="text" id="drugSearchInput" placeholder="服用中のお薬の名前を入力して検索">
+      </div>
+      <div class="drug-search-result" id="drugSearchResult"></div>
+      <div class="drug-index-list" id="drugIndexList"></div>
+    </details>
+
+    <div class="radio-group" data-group="contraindicationStatus" style="margin-top:12px;">
+      <label><input type="radio" name="contraindicationStatus" value="該当しない"><span>該当しない</span></label>
+      <label><input type="radio" name="contraindicationStatus" value="該当する"><span>該当する</span></label>
+    </div>
+    <div class="error-msg" id="err_contraindicationStatus">回答を選択してください</div>
+  </div>
+
+  <div class="section">
+    <label class="field-label">ご希望の薬剤と錠数<span class="req">必須</span></label>
+
+    <div class="drug-card">
+      <div class="drug-card-head">シルデナフィル<span class="drug-brand">(先発:バイアグラ)</span></div>
+      <div class="drug-row">
+        <div class="drug-dose">50mg<span class="drug-price">900円/錠</span></div>
+        <div class="drug-qty"><input type="number" name="qty_sildenafil50" min="0" id="qty_sildenafil50" value="0"><span>錠</span></div>
+      </div>
+      <ul class="drug-info-list">
+        <li>服用タイミング: 約1時間前</li><li>作用時間: 3〜5時間</li><li>食事の影響: 受けやすい</li>
+      </ul>
+    </div>
+
+    <div class="drug-card">
+      <div class="drug-card-head">バルデナフィル<span class="drug-brand">(先発:レビトラ)</span></div>
+      <div class="drug-row">
+        <div class="drug-dose">10mg<span class="drug-price">1,400円/錠</span></div>
+        <div class="drug-qty"><input type="number" name="qty_vardenafil10" min="0" id="qty_vardenafil10" value="0"><span>錠</span></div>
+      </div>
+      <div class="drug-row">
+        <div class="drug-dose">20mg<span class="drug-price">1,600円/錠</span></div>
+        <div class="drug-qty"><input type="number" name="qty_vardenafil20" min="0" id="qty_vardenafil20" value="0"><span>錠</span></div>
+      </div>
+      <ul class="drug-info-list">
+        <li>服用タイミング: 約30分前</li><li>作用時間: 5〜10時間</li><li>食事の影響: 高脂肪食で受けやすい</li>
+      </ul>
+    </div>
+
+    <div class="drug-card">
+      <div class="drug-card-head">タダラフィル<span class="drug-brand">(先発:シアリス)</span></div>
+      <div class="drug-row">
+        <div class="drug-dose">10mg<span class="drug-price">1,200円/錠</span></div>
+        <div class="drug-qty"><input type="number" name="qty_tadalafil10" min="0" id="qty_tadalafil10" value="0"><span>錠</span></div>
+      </div>
+      <div class="drug-row">
+        <div class="drug-dose">20mg<span class="drug-price">1,400円/錠</span></div>
+        <div class="drug-qty"><input type="number" name="qty_tadalafil20" min="0" id="qty_tadalafil20" value="0"><span>錠</span></div>
+      </div>
+      <ul class="drug-info-list">
+        <li>服用タイミング: 2〜3時間前</li><li>作用時間: 24〜36時間</li><li>食事の影響: 受けにくい</li>
+      </ul>
+    </div>
+    <div class="error-msg" id="err_drugQty">ご希望の薬剤を1つ以上選択(錠数を入力)してください</div>
+
+    <div class="total-box"><span>合計金額</span><span id="grandTotal">0円</span></div>
+    <input type="hidden" name="edTotalAmount" id="edTotalAmount" value="0">
+  </div>
+
+  <button type="submit" class="submit-btn">回答を送信する</button>
+</form>
+{% endif %}
+
+<script>
+function $(id){ return document.getElementById(id); }
+function radioValue(name){
+  const el = document.querySelector(`input[name="${name}"]:checked`);
+  return el ? el.value : null;
+}
+function showError(key, show){ const e = $('err_' + key); if (e) e.classList.toggle('show', show); }
+function toggle(el, show){ if (el) el.classList.toggle('show', show); }
+
+document.querySelectorAll('.radio-group').forEach(group => {
+  group.addEventListener('click', e => {
+    const label = e.target.closest('label');
+    if (!label) return;
+    group.querySelectorAll('label').forEach(l => l.classList.remove('checked'));
+    label.classList.add('checked');
+    const key = group.dataset.group;
+    if (key) showError(key, false);
+    handleConditionals();
+  });
+});
+$('ticketNumber') && $('ticketNumber').addEventListener('input', () => showError('ticketNumber', false));
+$('precautionsAgree') && $('precautionsAgree').addEventListener('change', () => showError('precautionsAgree', false));
+
+function handleConditionals(){
+  toggle($('healthEventSub'), radioValue('healthEventStatus') === 'ある');
+}
+if ($('edForm')) handleConditionals();
+
+const NITRATE_DRUG_INDEX = [["ア",["アイトロール錠10mg/20mg","亜硝酸アミル","アデムパス錠0.5mg/1.0mg/2..5mg","アミオダロン塩酸塩錠100mg","アミサリン錠125mg/250mg","アンカロン錠100","アンタップテープ40mg"]],["イ",["イソコロナールＲカプセル20mg","イソニトール錠10mg/20mg","イソピットテープ40mg","一硝酸イソソルビド錠10mg/20mg","イトラートカプセル50","イトラコナゾール錠50mg","イトリゾールカプセル50","イトリゾール内服液1%","インビラーゼカプセル200mg","インビラーゼ錠500mg"]],["ウ",["ヴィキラックス配合錠"]],["カ",["カリアントSRカプセル20mg","カレトラ配合錠","カレトラ配合内用液","冠動注用ミリスロール0.5mg/10mL"]],["ク",["クリキシバンカプセル200mg"]],["サ",["サークレス注0.05%/0.1%"]],["シ",["ジアセラＬ錠20mg","シグマート2.5mg/5mg","ジソピラミドカプセル50mg/100mg","ジソピラミド徐放錠150mg","ジソピラミドリン酸塩除放錠150mg","ジソピランカプセル50mg/100mg","ジドレンテープ27mg","シベノール錠50mg/100mg","シベンゾリンコハク酸塩錠50mg/100mg","硝酸イソソルビド除放錠20mg","硝酸イソソルビドテープ40mg","シルビノール錠5mg"]],["ス",["スタリビルド配合錠"]],["ソ",["ソタコール錠40mg/80mg","ソプレロール錠10mg/20mg"]],["タ",["タイシロール錠10mg/20mg"]],["チ",["チヨバンカプセル50mg/100mg"]],["テ",["テラビック錠250mg"]],["ニ",["ニコランジル錠2.5mg/5mg","ニコランマート錠2.5mg/5mg","ニトラステープ40mg","ニトロールRカプセル20mg","ニトロール錠5mg","ニトログリセリン舌下錠","ニトロダームTTS25mg","ニトロペン舌下錠0.3mg","ニプラノール点眼液0.25%","ニプラジロール点眼液0.25%"]],["ノ",["ノービア錠100mg","ノービア内用液8％","ノルペースカプセル50mg/100mg","ノルペースCR錠150mg"]],["ハ",["ハイパジールコーワ錠3/6","ハイパジールコーワ点眼液0.25%","バソレーターテープ27mg"]],["ヒ",["ピメノールカプセル50mg/100mg"]],["フ",["フランドル錠20mg","フランドルテープ40mg","プリジスタ錠300mg","プリジスタナイーブ錠400mg/800mg"]],["ミ",["ミオコールスプレー0.3mg 0.65% 7.2g","ミニトロテープ27mg","ミリステープ5mg"]],["メ",["メディトランステープ27mg"]],["リ",["リスモダンR錠150mg","リスモダンカプセル50mg/100mg","リファタックテープ40mg","硫酸キニジン錠100mg","硫酸キニジン"]],["レ",["レイアタッツカプセル150mg/200mg","レクシヴァ錠700"]]];
+
+function renderDrugIndex(){
+  if (!$('drugIndexList')) return;
+  let html = '';
+  NITRATE_DRUG_INDEX.forEach(([kana, names]) => {
+    html += `<div><span class="idx-kana">${kana}</span>${names.join('、')}</div>`;
+  });
+  $('drugIndexList').innerHTML = html;
+}
+renderDrugIndex();
+
+const ALL_NAMES = NITRATE_DRUG_INDEX.reduce((acc, [, names]) => acc.concat(names), []);
+if ($('drugSearchInput')) {
+  $('drugSearchInput').addEventListener('input', () => {
+    const q = $('drugSearchInput').value.trim();
+    const resultEl = $('drugSearchResult');
+    if (!q) { resultEl.className = 'drug-search-result'; resultEl.innerHTML = ''; return; }
+    const matches = ALL_NAMES.filter(n => n.toLowerCase().includes(q.toLowerCase()));
+    if (matches.length) {
+      resultEl.className = 'drug-search-result show warn';
+      resultEl.innerHTML = `⚠ 該当する可能性のある薬剤が見つかりました:<br>${matches.map(m=>'・'+m).join('<br>')}<br>禁忌に該当する可能性があります。下の質問で「該当する」を選択してください。`;
+    } else {
+      resultEl.className = 'drug-search-result show none';
+      resultEl.innerHTML = '該当する薬剤名は見つかりませんでした。';
+    }
+  });
+}
+
+const DRUG_PRICES = { qty_sildenafil50:900, qty_vardenafil10:1400, qty_vardenafil20:1600, qty_tadalafil10:1200, qty_tadalafil20:1400 };
+function updateTotal(){
+  let total = 0;
+  Object.keys(DRUG_PRICES).forEach(key => {
+    const el = $(key);
+    if (!el) return;
+    const qty = parseInt(el.value, 10) || 0;
+    total += qty * DRUG_PRICES[key];
+  });
+  $('grandTotal').textContent = total.toLocaleString() + '円';
+  $('edTotalAmount').value = total;
+}
+Object.keys(DRUG_PRICES).forEach(key => { if ($(key)) $(key).addEventListener('input', updateTotal); });
+updateTotal();
+
+function validateForm(){
+  let firstInvalidEl = null;
+  let ok = true;
+  function check(key, passed, scrollEl){
+    showError(key, !passed);
+    if (!passed){ ok = false; if (!firstInvalidEl) firstInvalidEl = scrollEl; }
+  }
+  check('ticketNumber', $('ticketNumber').value.trim() !== '', $('ticketNumber').closest('.section'));
+  check('healthEventStatus', radioValue('healthEventStatus') !== null, document.querySelector('[data-group="healthEventStatus"]').closest('.section'));
+  check('sideEffectStatus', radioValue('sideEffectStatus') !== null, document.querySelector('[data-group="sideEffectStatus"]').closest('.section'));
+  check('precautionsAgree', $('precautionsAgree').checked, $('precautionsAgree').closest('.section'));
+  check('contraindicationStatus', radioValue('contraindicationStatus') !== null, document.querySelector('[data-group="contraindicationStatus"]').closest('.section'));
+
+  const totalQty = Object.keys(DRUG_PRICES).reduce((s, key) => s + (parseInt($(key).value, 10) || 0), 0);
+  check('drugQty', totalQty > 0, $('drugQty').closest('.section') || $('grandTotal').closest('.section'));
+
+  if (!ok && firstInvalidEl) firstInvalidEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  return ok;
+}
+
+if ($('edForm')) {
+  $('edForm').addEventListener('submit', e => {
+    if (!validateForm()) e.preventDefault();
+  });
+}
+</script>
+</body></html>
+"""
+
 
 @app.route("/form/<token>")
 def form(token):
@@ -2403,6 +2879,11 @@ def form(token):
     if form_type == "urology_new":
         return render_template_string(
             NEW_PATIENT_FORM_PAGE, token=token, saved=False, error=None
+        )
+
+    if form_type == "ed_followup":
+        return render_template_string(
+            ED_FORM_PAGE, token=token, saved=False, error=None
         )
 
     fields = get_form_fields(form_type)
@@ -2496,6 +2977,37 @@ def submit_urology():
     return render_template_string(
         UROLOGY_FORM_PAGE, token=token, gender="男", age=0, saved=True, error=None
     )
+
+
+@app.route("/submit/ed_followup", methods=["POST"])
+def submit_ed_followup():
+    token = request.form.get("token", "").strip()
+    patient_id = resolve_token(token)
+    if not patient_id:
+        return render_template_string(
+            ED_FORM_PAGE, token=token,
+            saved=False, error="このリンクは無効です。受付にお問い合わせください。",
+        )
+
+    f = request.form
+    record = {
+        "submitted_at": now_jst_str(),
+        "form_type": "ed_followup",
+        "confirmed": False,
+        "linked": True,
+        "ticketNumber": f.get("ticketNumber", "").strip(),
+        "healthEventStatus": f.get("healthEventStatus", ""),
+        "healthEventDetail": f.get("healthEventDetail", "").strip(),
+        "sideEffectStatus": f.get("sideEffectStatus", ""),
+        "precautionsAgree": "確認済み" if f.get("precautionsAgree") else "未確認",
+        "contraindicationStatus": f.get("contraindicationStatus", ""),
+        "edTotalAmount": f.get("edTotalAmount", "0").strip(),
+    }
+    for key in ED_DRUG_INFO:
+        record[key] = f.get(key, "0").strip()
+
+    save_record(patient_id, record)
+    return render_template_string(ED_FORM_PAGE, token=token, saved=True, error=None)
 
 
 @app.route("/submit/new_patient", methods=["POST"])

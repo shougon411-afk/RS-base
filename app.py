@@ -1718,6 +1718,12 @@ NEW_PATIENT_FORM_PAGE = """
   <input type="hidden" name="token" value="{{ token }}">
 
   <div class="section">
+    <label class="field-label">お手元の番号札の番号を入力してください<span class="req">必須</span></label>
+    <input type="number" name="ticketNumber" id="ticketNumber" inputmode="numeric" placeholder="例: 12">
+    <div class="error-msg" id="err_ticketNumber">番号札の番号を入力してください</div>
+  </div>
+
+  <div class="section">
     <label class="field-label">氏名<span class="req">必須</span></label>
     <input type="text" name="patientName" id="patientName" placeholder="例: 山田 太郎">
     <div class="error-msg" id="err_patientName">氏名を入力してください</div>
@@ -1754,12 +1760,6 @@ NEW_PATIENT_FORM_PAGE = """
     </div>
     <input type="text" name="patientAddress" id="patientAddress" placeholder="住所(郵便番号入力で自動入力されます。修正可)" style="margin-top:8px;">
     <div class="error-msg" id="err_patientAddress">住所を入力してください</div>
-  </div>
-
-  <div class="section">
-    <label class="field-label">お手元の番号札の番号を入力してください<span class="req">必須</span></label>
-    <input type="number" name="ticketNumber" id="ticketNumber" inputmode="numeric" placeholder="例: 12">
-    <div class="error-msg" id="err_ticketNumber">番号札の番号を入力してください</div>
   </div>
 
   <div class="section">

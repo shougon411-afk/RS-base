@@ -283,6 +283,7 @@ FORM_TYPES["urology_new"] = {
         {"key": "patientDob", "label": "生年月日", "type": "text"},
         {"key": "patientPostalCode", "label": "郵便番号", "type": "text"},
         {"key": "patientAddress", "label": "住所", "type": "text"},
+        {"key": "patientPhone", "label": "電話番号", "type": "text"},
     ] + FORM_TYPES["urology_general"]["fields"],
 }
 
@@ -497,6 +498,28 @@ VIEW_PAGE = """
   <h2>問診結果(患者ID: {{ patient_id }})</h2>
   <div class="meta">回答日時: {{ latest.submitted_at }}{% if is_latest %}（全{{ records|length }}件中 最新）{% else %}（過去の回答を表示中）{% endif %}</div>
 
+  {% if patient_info_text %}
+  <div class="karte-box">
+    <div class="karte-header">
+      <span>電話番号(コピペ用)</span>
+      <button id="copyInfoBtn" onclick="copyPatientInfo()">コピー</button>
+    </div>
+    <textarea class="karte" id="patientInfoText" readonly style="min-height:40px;">{{ patient_info_text }}</textarea>
+  </div>
+  <script>
+    function copyPatientInfo(){
+      const el = document.getElementById('patientInfoText');
+      el.select();
+      navigator.clipboard.writeText(el.value).then(() => {
+        const btn = document.getElementById('copyInfoBtn');
+        btn.textContent = 'コピーしました';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'コピー'; btn.classList.remove('copied'); }, 2000);
+      });
+    }
+  </script>
+  {% endif %}
+
   {% if karte_text %}
   <div class="karte-box">
     <div class="karte-header">
@@ -572,6 +595,12 @@ def format_value(field, value):
         except (ValueError, TypeError):
             pass
     return value
+
+
+def build_patient_info_text(record):
+    if not record or record.get("form_type") != "urology_new":
+        return ""
+    return record.get("patientPhone", "") or ""
 
 
 def build_karte_text(record, gender=None, age=None):
@@ -687,6 +716,7 @@ def admin_view(patient_id):
     gender = dir_entry.get("gender") or None
     age = compute_age(dir_entry.get("dob", "")) if dir_entry.get("dob") else None
     karte_text = build_karte_text(record, gender=gender, age=age)
+    patient_info_text = build_patient_info_text(record)
 
     return render_template_string(
         VIEW_PAGE,
@@ -697,6 +727,7 @@ def admin_view(patient_id):
         is_latest=is_latest,
         format_value=format_value,
         karte_text=karte_text,
+        patient_info_text=patient_info_text,
     )
 
 
@@ -1761,6 +1792,12 @@ NEW_PATIENT_FORM_PAGE = """
   </div>
 
   <div class="section">
+    <label class="field-label">電話番号<span class="req">必須</span></label>
+    <input type="tel" name="patientPhone" id="patientPhone" inputmode="tel" placeholder="例: 090-1234-5678">
+    <div class="error-msg" id="err_patientPhone">電話番号を入力してください</div>
+  </div>
+
+  <div class="section">
     <label class="field-label">治療中もしくは過去に治療をした病気はありますか<span class="req">必須</span></label>
     <div class="radio-group" data-group="pastIllnessStatus">
       <label><input type="radio" name="pastIllnessStatus" value="ない"><span>ない</span></label>
@@ -2104,6 +2141,7 @@ $('symptomOnset') && $('symptomOnset').addEventListener('input', () => showError
 $('patientName') && $('patientName').addEventListener('input', () => showError('patientName', false));
 $('patientNameKana') && $('patientNameKana').addEventListener('input', () => showError('patientNameKana', false));
 $('patientAddress') && $('patientAddress').addEventListener('input', () => showError('patientAddress', false));
+$('patientPhone') && $('patientPhone').addEventListener('input', () => showError('patientPhone', false));
 
 document.querySelectorAll('#pastIllnessList .other-toggle input').forEach(el => {
   el.addEventListener('change', () => {
@@ -2268,6 +2306,7 @@ function validateForm(){
   check('patientGender', radioValue('patientGender') !== null, document.querySelector('[data-group="patientGender"]').closest('.section'));
   check('patientDob', $('patientDob').value.trim() !== '', $('patientDob').closest('.section'));
   check('patientAddress', $('patientAddress').value.trim() !== '', $('patientAddress').closest('.section'));
+  check('patientPhone', $('patientPhone').value.trim() !== '', $('patientPhone').closest('.section'));
 
   function check(key, passed, scrollEl){
     showError(key, !passed);
@@ -2477,6 +2516,7 @@ def submit_new_patient():
     dob = dob_raw.replace("-", "/") if dob_raw else ""
     postal = f.get("patientPostalCode", "").strip()
     address = f.get("patientAddress", "").strip()
+    phone = f.get("patientPhone", "").strip()
 
     record = {
         "submitted_at": now_jst_str(),
@@ -2489,6 +2529,7 @@ def submit_new_patient():
         "patientDob": dob,
         "patientPostalCode": postal,
         "patientAddress": address,
+        "patientPhone": phone,
     }
     record.update(collect_common_urology_fields(f))
     record = compute_scores(record, get_form_fields("urology_new"))

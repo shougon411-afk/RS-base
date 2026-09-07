@@ -200,19 +200,17 @@ FORM_TYPES = {
     "urology_general": {
         "label": "お久しぶり再診",
         "fields": [
-            {"key": "ticketNumber", "label": "番号札の番号", "type": "text"},
-            {"key": "pastIllnessStatus", "label": "治療中もしくは過去に治療をした病気", "type": "text"},
-            {"key": "pastIllnessItems", "label": "既往症(該当項目)", "type": "text"},
-            {"key": "pastIllnessOtherDetail", "label": "既往症その他の詳細", "type": "text"},
-            {"key": "medicationStatus", "label": "現在飲んでいるお薬", "type": "text"},
+            {"key": "ticketNumber", "label": "番号札", "type": "text"},
+            {"key": "pastIllnessSummary", "label": "既往歴", "type": "text"},
+            {"key": "medicationStatus", "label": "服用薬", "type": "text"},
             {"key": "medicationBook", "label": "お薬手帳の提出", "type": "text"},
             {"key": "medicationDetail", "label": "服用中の薬品名", "type": "text"},
-            {"key": "agaStatus", "label": "AGA治療薬の服用", "type": "text"},
+            {"key": "agaStatus", "label": "AGA薬の服用", "type": "text"},
             {"key": "agaDetail", "label": "AGA治療薬の薬品名", "type": "text"},
-            {"key": "familyCancerStatus", "label": "ご家族(血縁者)のがん", "type": "text"},
+            {"key": "familyCancerStatus", "label": "家族歴", "type": "text"},
             {"key": "familyCancerItems", "label": "家族のがん(該当項目)", "type": "text"},
             {"key": "familyCancerOtherDetail", "label": "家族のがんその他の詳細", "type": "text"},
-            {"key": "allergyStatus", "label": "薬のアレルギー", "type": "text"},
+            {"key": "allergyStatus", "label": "薬剤アレルギー", "type": "text"},
             {"key": "allergyDetail", "label": "アレルギーの薬品名", "type": "text"},
             {"key": "pediatricWeight", "label": "体重(kg)(15歳未満)", "type": "text"},
             {"key": "alcohol", "label": "飲酒", "type": "text"},
@@ -2420,6 +2418,18 @@ def collect_common_urology_fields(f):
     }
     for k in IPSS_KEYS + ["ipss_qol"] + OABSS_KEYS:
         record[k] = f.get(k, "")
+
+    # 「治療中もしくは過去に治療をした病気」の回答を「既往歴」1行にまとめる
+    status = record["pastIllnessStatus"]
+    if status == "ある":
+        items = record["pastIllnessItems"]
+        other = record["pastIllnessOtherDetail"]
+        record["pastIllnessSummary"] = (items + "、" + other) if (items and other) else (items or other) or "なし"
+    elif status:
+        record["pastIllnessSummary"] = status
+    else:
+        record["pastIllnessSummary"] = "なし"
+
     return record
 
 

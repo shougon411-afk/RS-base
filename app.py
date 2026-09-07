@@ -40,7 +40,9 @@ from flask import (
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+# 永続ボリュームがマウントされていればそちらを使う(Railwayの再デプロイでもデータが消えない)。
+# 無ければ従来通りアプリ内のフォルダに保存する(ローカル動作用)。
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(BASE_DIR, "data"))
 os.makedirs(DATA_DIR, exist_ok=True)
 TOKENS_PATH = os.path.join(DATA_DIR, "_tokens.json")
 DIRECTORY_PATH = os.path.join(DATA_DIR, "_directory.json")
@@ -422,14 +424,24 @@ VIEW_PAGE = """
 <!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
 <title>問診結果</title>
 <style>
-  body{font-family:sans-serif;margin:0;padding:16px;background:#fffff2;color:#111;font-size:14px;}
-  h2{margin:0 0 4px;font-size:17px;}
-  .meta{color:#666;font-size:12px;margin-bottom:12px;}
+  body{font-family:sans-serif;margin:0;padding:10px 12px;background:#fffff2;color:#111;font-size:13px;}
+  h2{margin:0 0 2px;font-size:15px;}
+  .meta{color:#666;font-size:11px;margin-bottom:8px;}
   table{width:100%;border-collapse:collapse;}
-  td,th{border:1px solid #ddd;padding:7px 9px;vertical-align:top;text-align:left;}
-  th{background:#f3f3f3;width:32%;white-space:nowrap;}
+  td,th{border:1px solid #ddd;padding:4px 7px;vertical-align:top;text-align:left;line-height:1.3;}
+  th{background:#f3f3f3;width:30%;white-space:nowrap;font-size:12px;}
+  td{font-size:12px;}
   .empty{color:#999;text-align:center;padding:40px 0;}
-  .top a{font-size:12px;margin-right:10px;}
+  .top a{font-size:11px;margin-right:10px;}
+  .karte-box{margin-bottom:10px;border:1px solid #bbb;border-radius:8px;overflow:hidden;}
+  .karte-header{display:flex;justify-content:space-between;align-items:center;
+       background:#e8f0fe;padding:5px 8px;}
+  .karte-header span{font-size:12px;font-weight:bold;}
+  .karte-header button{font-size:12px;padding:4px 10px;border:1px solid #1565c0;
+       background:#1565c0;color:#fff;border-radius:6px;cursor:pointer;}
+  .karte-header button.copied{background:#2e7d32;border-color:#2e7d32;}
+  textarea.karte{width:100%;box-sizing:border-box;border:none;padding:8px;font-size:12px;
+       font-family:"Courier New",monospace;min-height:180px;resize:vertical;background:#fff;}
 </style></head><body>
 <div class="top">
   <a href="{{ url_for('admin_dashboard') }}">← リンク発行に戻る</a>
@@ -440,6 +452,29 @@ VIEW_PAGE = """
 {% else %}
   <h2>問診結果(患者ID: {{ patient_id }})</h2>
   <div class="meta">回答日時: {{ latest.submitted_at }}{% if is_latest %}（全{{ records|length }}件中 最新）{% else %}（過去の回答を表示中）{% endif %}</div>
+
+  {% if karte_text %}
+  <div class="karte-box">
+    <div class="karte-header">
+      <span>カルテ転記用テンプレート</span>
+      <button id="copyBtn" onclick="copyKarte()">コピー</button>
+    </div>
+    <textarea class="karte" id="karteText" readonly>{{ karte_text }}</textarea>
+  </div>
+  <script>
+    function copyKarte(){
+      const el = document.getElementById('karteText');
+      el.select();
+      navigator.clipboard.writeText(el.value).then(() => {
+        const btn = document.getElementById('copyBtn');
+        btn.textContent = 'コピーしました';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'コピー'; btn.classList.remove('copied'); }, 2000);
+      });
+    }
+  </script>
+  {% endif %}
+
   <table>
     {% for f in fields %}
       <tr><th>{{ f.label }}</th><td>{{ format_value(f, latest.get(f.key, "")) }}</td></tr>
@@ -495,6 +530,85 @@ def format_value(field, value):
     return value
 
 
+def build_karte_text(record):
+    if not record or record.get("form_type") != "urology_general":
+        return ""
+
+    def g(key):
+        return record.get(key, "") or ""
+
+    status = g("pastIllnessStatus")
+    if status == "ある":
+        items = g("pastIllnessItems")
+        other = g("pastIllnessOtherDetail")
+        history = (items + "、" + other) if (items and other) else (items or other)
+    elif status:
+        history = status
+    else:
+        history = ""
+
+    a_status = g("allergyStatus")
+    allergy = g("allergyDetail") if a_status == "ある" else a_status
+
+    fc_status = g("familyCancerStatus")
+    if fc_status == "はい":
+        items = g("familyCancerItems")
+        other = g("familyCancerOtherDetail")
+        family = (items + "、" + other) if (items and other) else (items or other)
+    elif fc_status:
+        family = fc_status
+    else:
+        family = ""
+
+    smoking_status = g("smoking")
+    if smoking_status == "吸う":
+        smoking = f"{g('smokeActivePerDay')}*{g('smokeActiveYears')}"
+    elif smoking_status == "禁煙中":
+        smoking = f"{g('smokeQuitPerDay')}*{g('smokeQuitYears')}"
+    elif smoking_status == "吸わない":
+        smoking = "なし"
+    else:
+        smoking = ""
+
+    alcohol_map = {"飲まない": "飲まない", "たまに飲む": "機会飲酒", "ほぼ毎日飲む": "ほぼ毎日飲む"}
+    alcohol = alcohol_map.get(g("alcohol"), g("alcohol"))
+
+    pregnant = g("pregnant")
+    if pregnant == "はい" and g("pregnantWeek"):
+        pregnancy = f"はい({g('pregnantWeek')}週目)"
+    else:
+        pregnancy = pregnant
+
+    ipss_line = ""
+    if any(record.get(k) not in (None, "") for k in IPSS_KEYS):
+        digits = "".join(str(record.get(k, "")) for k in IPSS_KEYS)
+        total = record.get("ipss_total", "")
+        qol = record.get("ipss_qol", "")
+        ipss_line = f"{digits}（{total}）{qol}"
+
+    oabss_line = ""
+    if any(record.get(k) not in (None, "") for k in OABSS_KEYS):
+        oabss_line = "".join(str(record.get(k, "")) for k in OABSS_KEYS)
+
+    lines = [
+        "【初診】",
+        "＜profile＞",
+        f"【既往歴】{history}",
+        f"【アレルギー】{allergy}【家族歴】{family}",
+        f"【喫煙】{smoking}【飲酒】{alcohol}【妊娠】{pregnancy}",
+        "【紹介元】",
+        "【備考】",
+        f"　IPSS：{ipss_line}　OABSS：{oabss_line}",
+        "-------------------------------------------",
+        "S:",
+        "O:",
+        "<検尿>　",
+        "",
+        "A:",
+    ]
+    return "\n".join(lines)
+
+
 @app.route("/admin/view/<patient_id>")
 @login_required
 def admin_view(patient_id):
@@ -507,6 +621,7 @@ def admin_view(patient_id):
         record = records[-1] if records else None
         is_latest = True
     fields = get_form_fields(record.get("form_type", "general")) if record else []
+    karte_text = build_karte_text(record)
     return render_template_string(
         VIEW_PAGE,
         patient_id=patient_id,
@@ -515,6 +630,7 @@ def admin_view(patient_id):
         fields=fields,
         is_latest=is_latest,
         format_value=format_value,
+        karte_text=karte_text,
     )
 
 

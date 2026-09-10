@@ -1,13 +1,16 @@
-const input = document.getElementById("serverBase");
+const serverBaseInput = document.getElementById("serverBase");
+const kensaServerBaseInput = document.getElementById("kensaServerBase");
 const status = document.getElementById("status");
 
-chrome.storage.sync.get(["serverBase"], (res) => {
-  if (res.serverBase) input.value = res.serverBase;
+chrome.storage.sync.get(["serverBase", "kensaServerBase"], (res) => {
+  if (res.serverBase) serverBaseInput.value = res.serverBase;
+  if (res.kensaServerBase) kensaServerBaseInput.value = res.kensaServerBase;
 });
 
 document.getElementById("saveBtn").addEventListener("click", () => {
-  const value = input.value.trim().replace(/\/$/, "");
-  chrome.storage.sync.set({ serverBase: value }, () => {
+  const serverBase = serverBaseInput.value.trim().replace(/\/$/, "");
+  const kensaServerBase = kensaServerBaseInput.value.trim().replace(/\/$/, "");
+  chrome.storage.sync.set({ serverBase, kensaServerBase }, () => {
     status.textContent = "保存しました。N2017.cgiのページを再読み込みしてください。";
     setTimeout(() => (status.textContent = ""), 3000);
   });

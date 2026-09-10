@@ -5,9 +5,10 @@
 <title>問診ビューア 設定</title>
 <style>
   body { font-family: sans-serif; padding: 20px; width: 380px; }
-  label { display: block; margin-bottom: 6px; font-weight: bold; }
+  label { display: block; margin-bottom: 6px; font-weight: bold; margin-top: 16px; }
+  label:first-of-type { margin-top: 0; }
   input { width: 100%; padding: 8px; font-size: 14px; box-sizing: border-box; }
-  button { margin-top: 12px; padding: 8px 16px; cursor: pointer; }
+  button { margin-top: 16px; padding: 8px 16px; cursor: pointer; }
   .hint { color: #666; font-size: 12px; margin-top: 6px; }
   .status { margin-top: 10px; color: green; font-size: 13px; }
 </style>
@@ -16,6 +17,11 @@
   <label for="serverBase">問診サーバーのアドレス</label>
   <input id="serverBase" type="text" placeholder="例: https://monshin-server-production.up.railway.app">
   <div class="hint">問診サーバー(app.py)を動かしているPCのIPアドレスとポート番号を入力してください。</div>
+
+  <label for="kensaServerBase">LINE検査結果送信システムのアドレス</label>
+  <input id="kensaServerBase" type="text" placeholder="例: https://line-kensa-system-production.up.railway.app">
+  <div class="hint">「LINE検査登録」ボタンから開く検査結果送信システムのURLを入力してください。</div>
+
   <button id="saveBtn">保存</button>
   <div id="status" class="status"></div>
   <script src="options.js"></script>

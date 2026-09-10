@@ -1,241 +1,166 @@
+/**
+ * RS-base連携: 患者ID・氏名(カタカナ)・生年月日の自動入力
+ * ------------------------------------------------------------
+ * 【組み込み方法】
+ * public/admin/index.html を開き、既存の <script> ... </script>(管理画面の
+ * ロジックが書かれているタグ)の閉じタグ直前に、このファイルの中身を
+ * まるごと貼り付けてください。もしくは、この内容を
+ * public/admin/autofill.js として保存し、既存の <script> タグの直前に
+ *   <script src="autofill.js"></script>
+ * を追加しても構いません。
+ *
+ * 【前提にしている画面のID】(実際にログインして確認済み)
+ *   患者ID           : #p-id
+ *   氏名(カタカナ)     : #p-name
+ *   生年月日 元号セレクト : #p-era      (明治/大正/昭和/平成/令和)
+ *   生年月日 年        : #p-era-year
+ *   生年月日 月        : #p-month
+ *   生年月日 日        : #p-day
+ *
+ * 既存の登録処理(送信ボタン #p-submit まわりのコード)には一切手を
+ * 加えていません。このスクリプトは上記の入力欄に値をセットするだけです。
+ *
+ * 【URLパラメータの仕様】(RS-base拡張機能側と合わせる)
+ *   ?pid=000123&kana=ヤマダ%20タロウ&dob=2002-04-11
+ *   - pid : 患者ID(6桁)
+ *   - kana: 氏名のカタカナ(空白区切り可)
+ *   - dob : 生年月日、西暦のISO形式 YYYY-MM-DD
+ */
 (function () {
   "use strict";
 
-  const BUTTON_ID = "monshinViewerButton";
-  const KENSA_BUTTON_ID = "kensaLineButton";
+  // ===== 西暦 <-> 和暦 変換 =====
+  // 明治以降の元号切り替え日(その元号が始まる日)
+  const ERA_TABLE = [
+    { name: "令和", start: new Date(2019, 4, 1) }, // 2019-05-01
+    { name: "平成", start: new Date(1989, 0, 8) }, // 1989-01-08
+    { name: "昭和", start: new Date(1926, 11, 25) }, // 1926-12-25
+    { name: "大正", start: new Date(1912, 6, 30) }, // 1912-07-30
+    { name: "明治", start: new Date(1868, 0, 25) }, // 1868-01-25
+  ];
 
-  function extractPatientId() {
-    // 既存の「問診表示」ボタンと同じロジック。変更していません。
-    const html = document.documentElement.innerHTML;
-
-    // このクリニックのN2017.cgiでは、音声入力用に
-    // window.RS_VOICE_PATIENT_ID='2'; のようなグローバル変数が
-    // ページ内スクリプトに埋め込まれているため、これを利用する。
-    let m = html.match(/RS_VOICE_PATIENT_ID\s*=\s*'(\d+)'/);
-    if (m) return m[1];
-
-    m = html.match(/kanja_id=(\d+)/);
-    if (m) return m[1];
-
-    m = html.match(/RS_GROWTH_CHART_URL\s*=\s*'[^']*[?&]id=(\d+)/);
-    if (m) return m[1];
-
-    return null;
+  function seirekiToWareki(year, month, day) {
+    const d = new Date(year, month - 1, day);
+    for (const era of ERA_TABLE) {
+      if (d >= era.start) {
+        return { era: era.name, eraYear: year - era.start.getFullYear() + 1, month, day };
+      }
+    }
+    return null; // 明治より前の生年月日は非対応
   }
 
-  function readHiddenValue(id) {
-    const el = document.getElementById(id);
-    return el ? el.value.trim() : "";
+  function warekiToSeireki(eraName, eraYear, month, day) {
+    const era = ERA_TABLE.find((e) => e.name === eraName);
+    if (!era || !eraYear) return null;
+    return { year: era.start.getFullYear() + Number(eraYear) - 1, month, day };
   }
 
-  // ============================================================
-  // 半角カタカナ(ｱｲｳ...、濁点ﾞ・半濁点ﾟは分離した状態)を
-  // 全角カタカナに変換する。
-  // 実機コンソールで確認: yomi_search = "ｲｼｲ ｼｮｳｺﾞ" -> "イシイ ショウゴ"
-  // ============================================================
-  function hankakuKanaToZenkaku(str) {
-    const kanaMap = {
-      ｦ: "ヲ", ｧ: "ァ", ｨ: "ィ", ｩ: "ゥ", ｪ: "ェ", ｫ: "ォ",
-      ｬ: "ャ", ｭ: "ュ", ｮ: "ョ", ｯ: "ッ", ｰ: "ー",
-      ｱ: "ア", ｲ: "イ", ｳ: "ウ", ｴ: "エ", ｵ: "オ",
-      ｶ: "カ", ｷ: "キ", ｸ: "ク", ｹ: "ケ", ｺ: "コ",
-      ｻ: "サ", ｼ: "シ", ｽ: "ス", ｾ: "セ", ｿ: "ソ",
-      ﾀ: "タ", ﾁ: "チ", ﾂ: "ツ", ﾃ: "テ", ﾄ: "ト",
-      ﾅ: "ナ", ﾆ: "ニ", ﾇ: "ヌ", ﾈ: "ネ", ﾉ: "ノ",
-      ﾊ: "ハ", ﾋ: "ヒ", ﾌ: "フ", ﾍ: "ヘ", ﾎ: "ホ",
-      ﾏ: "マ", ﾐ: "ミ", ﾑ: "ム", ﾒ: "メ", ﾓ: "モ",
-      ﾔ: "ヤ", ﾕ: "ユ", ﾖ: "ヨ",
-      ﾗ: "ラ", ﾘ: "リ", ﾙ: "ル", ﾚ: "レ", ﾛ: "ロ",
-      ﾜ: "ワ", ﾝ: "ン",
-      "｡": "。", "､": "、", "｢": "「", "｣": "」", "･": "・",
-    };
-    const dakutenMap = {
-      カ: "ガ", キ: "ギ", ク: "グ", ケ: "ゲ", コ: "ゴ",
-      サ: "ザ", シ: "ジ", ス: "ズ", セ: "ゼ", ソ: "ゾ",
-      タ: "ダ", チ: "ヂ", ツ: "ヅ", テ: "デ", ト: "ド",
-      ハ: "バ", ヒ: "ビ", フ: "ブ", ヘ: "ベ", ホ: "ボ", ウ: "ヴ",
-    };
-    const handakutenMap = { ハ: "パ", ヒ: "ピ", フ: "プ", ヘ: "ペ", ホ: "ポ" };
+  // グローバルに公開しておく(管理画面の他の場所からも使えるように)
+  window.seirekiToWareki = seirekiToWareki;
+  window.warekiToSeireki = warekiToSeireki;
 
-    let result = "";
-    for (let i = 0; i < str.length; i++) {
-      const ch = str[i];
-      const next = str[i + 1];
-      if (kanaMap[ch]) {
-        const base = kanaMap[ch];
-        if (next === "ﾞ" && dakutenMap[base]) {
-          result += dakutenMap[base];
-          i++;
-        } else if (next === "ﾟ" && handakutenMap[base]) {
-          result += handakutenMap[base];
-          i++;
-        } else {
-          result += base;
+  // ===== RS-baseから渡された情報での自動入力 =====
+  function autofillFromQuery() {
+    const params = new URLSearchParams(location.search);
+    const pid = params.get("pid");
+    const kana = params.get("kana");
+    const dob = params.get("dob"); // YYYY-MM-DD (西暦)
+
+    if (!pid && !kana && !dob) return;
+
+    const idEl = document.getElementById("p-id");
+    const nameEl = document.getElementById("p-name");
+    const eraEl = document.getElementById("p-era");
+    const eraYearEl = document.getElementById("p-era-year");
+    const monthEl = document.getElementById("p-month");
+    const dayEl = document.getElementById("p-day");
+
+    if (pid && idEl) idEl.value = pid;
+    if (kana && nameEl) nameEl.value = kana;
+
+    if (dob) {
+      const m = dob.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (m) {
+        const y = Number(m[1]);
+        const mo = Number(m[2]);
+        const da = Number(m[3]);
+        const w = seirekiToWareki(y, mo, da);
+        if (w && eraEl && eraYearEl && monthEl && dayEl) {
+          eraEl.value = w.era;
+          eraYearEl.value = w.eraYear;
+          monthEl.value = w.month;
+          dayEl.value = w.day;
         }
-      } else if (ch === "　") {
-        result += " ";
-      } else {
-        result += ch; // 半角カナ以外(スペース等)はそのまま
       }
     }
-    return result;
-  }
 
-  // ============================================================
-  // LINE検査登録ボタン用の患者情報抽出。
-  // 実機コンソールで確認済みの隠しフィールドから直接値を読む
-  // (正規表現でHTMLから拾うより確実):
-  //   id_search   : 患者ID (例 "2" ※ゼロ埋めされていない)
-  //   yomi_search : 氏名の読み、半角カタカナ (例 "ｲｼｲ ｼｮｳｺﾞ")
-  //   y_pt/m_pt/d_pt : 生年月日(西暦)を年・月・日に分けて保持
-  // ============================================================
-  function extractKensaPatientInfo() {
-    const rawId = readHiddenValue("id_search");
-    const yomi = readHiddenValue("yomi_search");
-    const y = readHiddenValue("y_pt");
-    const mo = readHiddenValue("m_pt");
-    const d = readHiddenValue("d_pt");
-
-    // line-kensa-system側は「患者ID(6桁の数字)」なのでゼロ埋めする。
-    // id_search が取れない場合は、既存の問診表示用ロジックにフォールバック。
-    const idSource = rawId || extractPatientId() || "";
-    const patientId = idSource ? idSource.padStart(6, "0") : "";
-
-    const kana = yomi ? hankakuKanaToZenkaku(yomi).trim() : "";
-
-    let dobIso = "";
-    if (y && mo && d) {
-      dobIso = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    }
-
-    return { patientId, kana, dobIso };
-  }
-
-  function getSettings() {
-    return new Promise((resolve) => {
-      chrome.storage.sync.get(["serverBase", "kensaServerBase"], (res) => {
-        resolve({
-          serverBase: (res.serverBase || "").trim().replace(/\/$/, ""),
-          kensaServerBase: (res.kensaServerBase || "").trim().replace(/\/$/, ""),
-        });
-      });
+    // 自動入力された項目がひと目でわかるように色をつける(見た目だけの変更)
+    [idEl, nameEl, eraEl, eraYearEl, monthEl, dayEl].forEach((el) => {
+      if (!el) return;
+      el.style.backgroundColor = "#eefaf3";
+      el.style.borderColor = "#a7e6c1";
     });
+
+    if (idEl && idEl.parentElement) {
+      const badge = document.createElement("div");
+      badge.textContent = "RS-baseから自動入力";
+      badge.style.cssText =
+        "display:inline-block;font-size:11px;font-weight:700;color:#0b6b3a;" +
+        "background:#d9f7e6;border:1px solid #a7e6c1;border-radius:999px;" +
+        "padding:2px 10px;margin-bottom:8px;";
+      idEl.parentElement.insertBefore(badge, idEl.parentElement.firstChild);
+    }
   }
 
-  function ensureButton(serverBase, patientId) {
-    if (document.getElementById(BUTTON_ID)) return;
+  // ===== 西暦での入力を補助する小さなツール =====
+  // 既存の和暦(元号/年/月/日)欄はそのまま残し、その下に
+  // 「西暦から自動計算」の補助入力を追加する。西暦欄に入力すると
+  // 既存の和暦欄(#p-era 等、登録時に実際に使われる項目)へ反映される。
+  function addSeirekiHelper() {
+    const eraEl = document.getElementById("p-era");
+    const eraYearEl = document.getElementById("p-era-year");
+    const monthEl = document.getElementById("p-month");
+    const dayEl = document.getElementById("p-day");
+    if (!eraEl || !eraYearEl || !monthEl || !dayEl) return;
+    if (document.getElementById("p-seireki-helper")) return;
 
-    const btn = document.createElement("div");
-    btn.id = BUTTON_ID;
-    btn.textContent = "問診表示";
-    btn.title = "この患者の問診結果を新しいタブで開く";
-    btn.style.cssText = [
-      "position:fixed",
-      "right:0",
-      "top:465px",
-      "z-index:2147482998",
-      "background:#efe6ff",
-      "border:1px solid #666",
-      "border-right:none",
-      "border-radius:8px 0 0 8px",
-      "padding:10px 6px",
-      "cursor:pointer",
-      "font-size:13px",
-      "font-family:sans-serif",
-      "writing-mode:vertical-rl",
-      "box-shadow:0 2px 8px rgba(0,0,0,0.25)",
-    ].join(";");
+    const wrap = document.createElement("div");
+    wrap.id = "p-seireki-helper";
+    wrap.style.cssText =
+      "display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:#555;";
+    wrap.innerHTML =
+      '<span>西暦から自動計算:</span>' +
+      '<input type="number" id="p-seireki-year" placeholder="例:2002" style="width:70px;padding:6px;border:1px solid #ccc;border-radius:6px;font-size:13px;">年' +
+      '<input type="number" id="p-seireki-month" placeholder="月" style="width:44px;padding:6px;border:1px solid #ccc;border-radius:6px;font-size:13px;">月' +
+      '<input type="number" id="p-seireki-day" placeholder="日" style="width:44px;padding:6px;border:1px solid #ccc;border-radius:6px;font-size:13px;">日';
 
-    btn.onclick = () => {
-      if (!serverBase) {
-        alert(
-          "問診サーバーのアドレスが未設定です。\n" +
-            "拡張機能を右クリック→「オプション」から設定してください。"
-        );
-        return;
+    // 和暦欄(#p-era)の後ろに挿入する。実際のレイアウトによっては
+    // 挿入位置を調整してください。
+    eraEl.parentElement.insertAdjacentElement("afterend", wrap);
+
+    const y = wrap.querySelector("#p-seireki-year");
+    const mo = wrap.querySelector("#p-seireki-month");
+    const da = wrap.querySelector("#p-seireki-day");
+
+    function sync() {
+      const yy = parseInt(y.value, 10);
+      const mm = parseInt(mo.value, 10);
+      const dd = parseInt(da.value, 10);
+      if (!yy || !mm || !dd) return;
+      const w = seirekiToWareki(yy, mm, dd);
+      if (w) {
+        eraEl.value = w.era;
+        eraYearEl.value = w.eraYear;
+        monthEl.value = w.month;
+        dayEl.value = w.day;
       }
-      if (!patientId) {
-        alert("この画面から患者IDを取得できませんでした。");
-        return;
-      }
-      // 別タブで開く(iframe埋め込みにすると、クロスオリジンで
-      // ログインセッションのCookieがブロックされることがあるため)
-      window.open(`${serverBase}/admin/view/${encodeURIComponent(patientId)}`, "_blank");
-    };
-
-    document.body.appendChild(btn);
+    }
+    [y, mo, da].forEach((el) => el.addEventListener("input", sync));
   }
 
-  // ============================================================
-  // 新規: 「LINE検査登録」タブ。
-  // line-kensa-system の管理画面(/admin/)を、患者ID・氏名(カタカナ)・
-  // 生年月日(西暦, YYYY-MM-DD)をクエリパラメータで渡した状態で新しいタブに開く。
-  // 和暦への変換はline-kensa-system側(kensa-admin-autofill.js)で行う。
-  // ============================================================
-  function ensureKensaButton(kensaServerBase, patientId, nameKana, dobIso) {
-    if (document.getElementById(KENSA_BUTTON_ID)) return;
-
-    const btn = document.createElement("div");
-    btn.id = KENSA_BUTTON_ID;
-    btn.textContent = "LINE検査登録";
-    btn.title = "この患者の情報を引き継いでLINE検査結果送信システムの登録画面を開く";
-    btn.style.cssText = [
-      "position:fixed",
-      "right:0",
-      "top:545px",
-      "z-index:2147482998",
-      "background:#d9f7e6",
-      "border:1px solid #06C755",
-      "border-right:none",
-      "border-radius:8px 0 0 8px",
-      "padding:10px 6px",
-      "cursor:pointer",
-      "font-size:13px",
-      "font-weight:bold",
-      "color:#0b6b3a",
-      "font-family:sans-serif",
-      "writing-mode:vertical-rl",
-      "box-shadow:0 2px 8px rgba(0,0,0,0.25)",
-    ].join(";");
-
-    btn.onclick = () => {
-      if (!kensaServerBase) {
-        alert(
-          "検査結果送信システムのアドレスが未設定です。\n" +
-            "拡張機能を右クリック→「オプション」から設定してください。"
-        );
-        return;
-      }
-      if (!patientId) {
-        alert("この画面から患者IDを取得できませんでした。");
-        return;
-      }
-      if (!nameKana) {
-        // カナが取れなくても患者ID等は渡した状態で開き、氏名だけ手入力してもらう
-        alert(
-          "カタカナ氏名を自動取得できませんでした。氏名欄は手入力してください。\n" +
-            "(yomi_search フィールドの値を確認してください)"
-        );
-      }
-
-      const params = new URLSearchParams();
-      params.set("pid", patientId);
-      if (nameKana) params.set("kana", nameKana);
-      if (dobIso) params.set("dob", dobIso);
-
-      window.open(`${kensaServerBase}/admin/?${params.toString()}`, "_blank");
-    };
-
-    document.body.appendChild(btn);
-  }
-
-  async function init() {
-    const patientId = extractPatientId();
-    const { patientId: kensaPatientId, kana: nameKana, dobIso } = extractKensaPatientInfo();
-    const { serverBase, kensaServerBase } = await getSettings();
-
-    ensureButton(serverBase, patientId);
-    ensureKensaButton(kensaServerBase, kensaPatientId, nameKana, dobIso);
+  function init() {
+    addSeirekiHelper();
+    autofillFromQuery();
   }
 
   if (document.readyState === "loading") {
@@ -243,5 +168,4 @@
   } else {
     init();
   }
-  window.addEventListener("load", init);
 })();
